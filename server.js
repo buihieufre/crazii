@@ -38,13 +38,13 @@ function getActiveRefreshToken() {
     const envPath = path.join(__dirname, '.env');
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
-      const match = envContent.match(/^REFRESH_TOKEN=(.*)$/m);
+      const match = envContent.match(/^(?:CRAZII_REFRESH_TOKEN|REFRESH_TOKEN)=(.*)$/m);
       if (match && match[1].trim() && !match[1].includes('PLACEHOLDER')) {
         return match[1].trim();
       }
     }
   } catch (e) { }
-  return process.env.REFRESH_TOKEN || '';
+  return process.env.CRAZII_REFRESH_TOKEN || process.env.REFRESH_TOKEN || '';
 }
 
 /**
@@ -55,13 +55,13 @@ function getActiveDeviceId() {
     const envPath = path.join(__dirname, '.env');
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
-      const match = envContent.match(/^DEVICE_ID=(.*)$/m);
+      const match = envContent.match(/^(?:CRAZII_DEVICE_ID|DEVICE_ID)=(.*)$/m);
       if (match && match[1].trim() && !match[1].includes('PLACEHOLDER')) {
         return match[1].trim();
       }
     }
   } catch (e) { }
-  return process.env.DEVICE_ID || 'fb70bf82-5d83-4c70-b7e6-9896bda770e7';
+  return process.env.CRAZII_DEVICE_ID || process.env.DEVICE_ID || 'fb70bf82-5d83-4c70-b7e6-9896bda770e7';
 }
 
 /**
@@ -76,15 +76,16 @@ function getActiveAuthToken(req) {
     }
   }
 
-  if (process.env.AUTH_TOKEN && process.env.AUTH_TOKEN.trim() && !process.env.AUTH_TOKEN.includes('PLACEHOLDER')) {
-    return process.env.AUTH_TOKEN.trim();
+  const envToken = process.env.CRAZII_ACCESS_TOKEN || process.env.CRAZII_AUTH_TOKEN || process.env.AUTH_TOKEN;
+  if (envToken && envToken.trim() && !envToken.includes('PLACEHOLDER')) {
+    return envToken.trim();
   }
 
   try {
     const envPath = path.join(__dirname, '.env');
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
-      const match = envContent.match(/^AUTH_TOKEN=(.*)$/m);
+      const match = envContent.match(/^(?:CRAZII_ACCESS_TOKEN|CRAZII_AUTH_TOKEN|AUTH_TOKEN)=(.*)$/m);
       if (match && match[1].trim() && !match[1].includes('PLACEHOLDER')) {
         return match[1].trim();
       }
@@ -104,21 +105,27 @@ function updateEnvTokens({ authToken, refreshToken }) {
 
     if (authToken) {
       const cleanAuth = authToken.replace(/^Bearer\s+/i, '').trim();
+      process.env.CRAZII_ACCESS_TOKEN = cleanAuth;
       process.env.AUTH_TOKEN = cleanAuth;
-      if (/^AUTH_TOKEN=/m.test(content)) {
-        content = content.replace(/^AUTH_TOKEN=.*$/m, `AUTH_TOKEN=${cleanAuth}`);
+      if (/^CRAZII_ACCESS_TOKEN=/m.test(content)) {
+        content = content.replace(/^CRAZII_ACCESS_TOKEN=.*$/m, `CRAZII_ACCESS_TOKEN=${cleanAuth}`);
+      } else if (/^AUTH_TOKEN=/m.test(content)) {
+        content = content.replace(/^AUTH_TOKEN=.*$/m, `CRAZII_ACCESS_TOKEN=${cleanAuth}`);
       } else {
-        content += `\nAUTH_TOKEN=${cleanAuth}\n`;
+        content += `\nCRAZII_ACCESS_TOKEN=${cleanAuth}\n`;
       }
     }
 
     if (refreshToken) {
       const cleanRefresh = refreshToken.replace(/^Bearer\s+/i, '').trim();
+      process.env.CRAZII_REFRESH_TOKEN = cleanRefresh;
       process.env.REFRESH_TOKEN = cleanRefresh;
-      if (/^REFRESH_TOKEN=/m.test(content)) {
-        content = content.replace(/^REFRESH_TOKEN=.*$/m, `REFRESH_TOKEN=${cleanRefresh}`);
+      if (/^CRAZII_REFRESH_TOKEN=/m.test(content)) {
+        content = content.replace(/^CRAZII_REFRESH_TOKEN=.*$/m, `CRAZII_REFRESH_TOKEN=${cleanRefresh}`);
+      } else if (/^REFRESH_TOKEN=/m.test(content)) {
+        content = content.replace(/^REFRESH_TOKEN=.*$/m, `CRAZII_REFRESH_TOKEN=${cleanRefresh}`);
       } else {
-        content += `\nREFRESH_TOKEN=${cleanRefresh}\n`;
+        content += `\nCRAZII_REFRESH_TOKEN=${cleanRefresh}\n`;
       }
     }
 
