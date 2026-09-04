@@ -1,0 +1,1993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRAZII.COM | Real-Time Live Streaming Chart Terminal</title>
+  <!-- TradingView Lightweight Charts CDN -->
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- Socket.IO Client CDN -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-primary: #0b0e14;
+      --bg-header: #151821;
+      --border-color: #1e222d;
+      --text-main: #d1d4dc;
+      --text-muted: #787b86;
+      --accent-yellow: #FFEB3B;
+      --accent-red: #FF0000;
+      --accent-blue: #2962FF;
+      --accent-green: #00E676;
+      --accent-cyan: #00E5FF;
+      --accent-orange: #FFA726;
+      --accent-magenta: #E040FB;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header Bar */
+    header {
+      background: var(--bg-header);
+      border-bottom: 1px solid var(--border-color);
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 30;
+      min-height: 44px;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-logo {
+      font-weight: 900;
+      font-size: 15px;
+      letter-spacing: 1px;
+      color: #FFB300;
+      display: flex;
+      align-items: baseline;
+    }
+
+    .brand-logo span {
+      font-size: 10px;
+      color: #ffffff;
+      opacity: 0.8;
+    }
+
+    .symbol-pill {
+      background: #202533;
+      border: 1px solid var(--border-color);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: var(--accent-green);
+      box-shadow: 0 0 6px var(--accent-green);
+      animation: pulse 2s infinite;
+    }
+
+    .ws-status-badge {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 2px 7px;
+      border-radius: 3px;
+      background: rgba(0, 230, 118, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(0, 230, 118, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s ease;
+    }
+
+    .ws-status-badge.reconnecting {
+      background: rgba(255, 179, 0, 0.15);
+      color: #ffb300;
+      border-color: rgba(255, 179, 0, 0.35);
+    }
+
+    .ws-status-badge.reconnecting .live-dot {
+      background-color: #ffb300;
+      box-shadow: 0 0 6px #ffb300;
+      animation: pulse 0.7s infinite;
+    }
+
+    .ws-status-badge.disconnected {
+      background: rgba(255, 0, 0, 0.15);
+      color: #ff5252;
+      border-color: rgba(255, 0, 0, 0.3);
+    }
+
+    .ws-status-badge.disconnected .live-dot {
+      background-color: #ff5252;
+      box-shadow: none;
+      animation: none;
+    }
+
+    /* Token Status Pill */
+    .token-status-pill {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 2px 8px;
+      border-radius: 3px;
+      background: rgba(41, 98, 255, 0.15);
+      color: #82b1ff;
+      border: 1px solid rgba(41, 98, 255, 0.35);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .token-status-pill:hover {
+      background: rgba(41, 98, 255, 0.3);
+      border-color: #2962FF;
+    }
+
+    .token-status-pill.valid {
+      background: rgba(0, 230, 118, 0.12);
+      color: var(--accent-green);
+      border-color: rgba(0, 230, 118, 0.3);
+    }
+
+    .token-status-pill.expiring {
+      background: rgba(255, 179, 0, 0.15);
+      color: #ffb300;
+      border-color: rgba(255, 179, 0, 0.4);
+    }
+
+    .token-status-pill.expired {
+      background: rgba(255, 0, 0, 0.15);
+      color: #ff5252;
+      border-color: rgba(255, 0, 0, 0.4);
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity: 0.7; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.9); opacity: 0.7; }
+    }
+
+    /* Timeframe Selector */
+    .tf-group {
+      display: flex;
+      align-items: center;
+      background: #0f121a;
+      border: 1px solid var(--border-color);
+      border-radius: 5px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .tf-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .tf-btn:hover {
+      color: #ffffff;
+      background: #202533;
+    }
+
+    .tf-btn.active {
+      color: #ffffff;
+      background: #2962FF;
+      box-shadow: 0 1px 4px rgba(41, 98, 255, 0.4);
+    }
+
+    /* OHLC Stats Header Bar */
+    .ohlc-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+    }
+
+    .ohlc-item {
+      display: flex;
+      gap: 3px;
+    }
+
+    .ohlc-lbl {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .ohlc-val {
+      font-weight: 600;
+      color: var(--text-main);
+      transition: color 0.3s;
+    }
+
+    .ohlc-val.flash-up {
+      color: #00E676 !important;
+    }
+
+    .ohlc-val.flash-down {
+      color: #FF1744 !important;
+    }
+
+    .twb-tag {
+      padding: 1.5px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .twb-bullish {
+      background: rgba(255, 235, 59, 0.2);
+      color: var(--accent-yellow);
+      border: 1px solid rgba(255, 235, 59, 0.4);
+    }
+
+    .twb-bearish {
+      background: rgba(255, 0, 0, 0.2);
+      color: #ff5252;
+      border: 1px solid rgba(255, 0, 0, 0.4);
+    }
+
+    /* Controls */
+    .controls-section {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn {
+      background: #1f2533;
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 4px 9px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    .btn:hover {
+      background: #2a3142;
+      color: #ffffff;
+    }
+
+    .select-symbol {
+      background: #1f2533;
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      outline: none;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    /* Notification Banner */
+    #notification-banner {
+      display: none;
+      padding: 6px 14px;
+      font-size: 11.5px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      z-index: 25;
+    }
+
+    #notification-banner.error {
+      background: rgba(255, 0, 0, 0.15);
+      border-bottom: 1px solid rgba(255, 0, 0, 0.35);
+      color: #ff8a80;
+    }
+
+    #notification-banner.info {
+      background: rgba(41, 98, 255, 0.15);
+      border-bottom: 1px solid rgba(41, 98, 255, 0.35);
+      color: #90caf9;
+    }
+
+    /* Chart Viewport */
+    #chart-wrapper {
+      flex: 1;
+      position: relative;
+      width: 100%;
+      height: calc(100vh - 44px);
+      background: var(--bg-primary);
+      overflow: hidden;
+    }
+
+    #chart-container {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Watermarks */
+    .watermark-overlay {
+      position: absolute;
+      top: 28%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 68px;
+      font-weight: 900;
+      letter-spacing: 12px;
+      color: rgba(255, 255, 255, 0.035);
+      pointer-events: none;
+      user-select: none;
+      z-index: 2;
+    }
+
+    .watermark-top-right {
+      position: absolute;
+      top: 14px;
+      right: 185px;
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: rgba(255, 179, 0, 0.5);
+      pointer-events: none;
+      z-index: 2;
+      display: flex;
+      align-items: baseline;
+    }
+
+    .watermark-top-right span {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    .watermark-bottom-left {
+      position: absolute;
+      bottom: 8px;
+      left: 12px;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: rgba(255, 179, 0, 0.4);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .watermark-bottom-left span {
+      font-size: 9px;
+      color: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Exact TradingView Stacked Price & Countdown Badge on Right Scale */
+    .tv-price-scale-badge {
+      position: absolute;
+      right: 0;
+      top: 150px;
+      background: #000000;
+      border: 1px solid #363c4e;
+      border-right: none;
+      border-radius: 3px 0 0 3px;
+      padding: 2px 5px 2px 6px;
+      font-family: 'JetBrains Mono', -apple-system, BlinkMacSystemFont, monospace;
+      z-index: 35;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      min-width: 82px;
+      box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.7);
+      transform: translateY(-50%);
+      transition: top 0.05s ease-out, border-color 0.2s;
+    }
+
+    .tv-price-scale-badge.bullish {
+      border-left: 2.5px solid #FFEB3B;
+      background: #000000;
+    }
+
+    .tv-price-scale-badge.bearish {
+      border-left: 2.5px solid #FF0000;
+      background: #000000;
+    }
+
+    .tv-scale-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 6px;
+      line-height: 1.15;
+    }
+
+    .tv-scale-symbol {
+      font-size: 8.5px;
+      font-weight: 700;
+      color: #787b86;
+      letter-spacing: 0.3px;
+    }
+
+    .tv-scale-price {
+      font-size: 11px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.3px;
+    }
+
+    .tv-price-scale-badge.bullish .tv-scale-price {
+      color: #FFEB3B;
+    }
+
+    .tv-price-scale-badge.bearish .tv-scale-price {
+      color: #ff5252;
+    }
+
+    .tv-scale-bottom-row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      line-height: 1.15;
+      margin-top: 1.5px;
+    }
+
+    .tv-scale-countdown-text {
+      font-size: 10px;
+      font-weight: 600;
+      color: #d1d4dc;
+      letter-spacing: 0.5px;
+    }
+
+    .tv-header-countdown {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      margin-left: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Sub-pane Section Titles */
+    .pane-label-ksi {
+      position: absolute;
+      top: 66%;
+      left: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent-yellow);
+      background: rgba(17, 20, 29, 0.85);
+      padding: 1.5px 6px;
+      border-radius: 3px;
+      border: 1px solid rgba(255, 235, 59, 0.3);
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .pane-label-kcx {
+      position: absolute;
+      top: 86%;
+      left: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent-yellow);
+      background: rgba(17, 20, 29, 0.85);
+      padding: 1.5px 6px;
+      border-radius: 3px;
+      border: 1px solid rgba(255, 235, 59, 0.3);
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* Left-side Badges */
+    #left-badges-container {
+      position: absolute;
+      top: 0;
+      left: 6px;
+      height: 100%;
+      width: 75px;
+      pointer-events: none;
+      z-index: 15;
+    }
+
+    .left-badge {
+      position: absolute;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1.5px 5px;
+      border-radius: 3px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.6);
+      transform: translateY(-50%);
+      white-space: nowrap;
+      pointer-events: auto;
+      cursor: default;
+      transition: top 0.08s ease-out;
+    }
+
+    /* Floating Legend */
+    .legend-floating {
+      position: absolute;
+      top: 10px;
+      left: 85px;
+      background: rgba(22, 26, 36, 0.9);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 4px 10px;
+      z-index: 5;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+    }
+
+    .swatch-yellow { background: var(--accent-yellow); }
+    .swatch-red { background: var(--accent-red); }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-card {
+      background: var(--bg-header);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      width: 90%;
+      max-width: 480px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .modal-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .input-field {
+      width: 100%;
+      background: #0b0e14;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #ffffff;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      margin-top: 6px;
+      margin-bottom: 14px;
+      outline: none;
+    }
+
+    .input-field:focus {
+      border-color: #2962FF;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: #ffffff;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header>
+    <div class="brand-section">
+      <div class="brand-logo">CRAZII<span>.COM</span></div>
+      <div class="symbol-pill">
+        <span class="live-dot"></span>
+        <span id="symbol-display">XAUUSD.ca_5</span>
+        <span id="tv-header-countdown" class="tv-header-countdown"></span>
+      </div>
+
+      <!-- Timeframe Selector -->
+      <div class="tf-group">
+        <button class="tf-btn active" id="tf-5" onclick="setTimeframe('XAUUSD.ca_5', '5m', this)">5m</button>
+        <button class="tf-btn" id="tf-15" onclick="setTimeframe('XAUUSD.ca_15', '15m', this)">15m</button>
+        <button class="tf-btn" id="tf-d" onclick="setTimeframe('XAUUSD.ca_1440', '1D', this)">1D</button>
+      </div>
+
+      <!-- Live WebSocket Status -->
+      <div class="ws-status-badge" id="ws-badge">
+        <span class="live-dot" style="width:5px; height:5px;"></span>
+        <span id="ws-status-text">WS Live</span>
+      </div>
+
+      <!-- Live Token Status Badge -->
+      <div class="token-status-pill" id="token-status-pill" onclick="openTokenModal()" title="Quản lý Token & Auto-Refresh">
+        <span class="live-dot" id="token-dot" style="width:5px; height:5px;"></span>
+        <span id="token-status-label">Token: Đang kiểm tra...</span>
+      </div>
+    </div>
+
+    <!-- Live Dynamic OHLC Values -->
+    <div class="ohlc-bar" id="ohlc-bar">
+      <div class="ohlc-item"><span class="ohlc-lbl">O:</span><span class="ohlc-val" id="ohlc-o">-</span></div>
+      <div class="ohlc-item"><span class="ohlc-lbl">H:</span><span class="ohlc-val" id="ohlc-h">-</span></div>
+      <div class="ohlc-item"><span class="ohlc-lbl">L:</span><span class="ohlc-val" id="ohlc-l">-</span></div>
+      <div class="ohlc-item"><span class="ohlc-lbl">C:</span><span class="ohlc-val" id="ohlc-c">-</span></div>
+      <div class="ohlc-item"><span class="ohlc-lbl">TWB O:</span><span class="ohlc-val" id="twb-o">-</span></div>
+      <div class="ohlc-item"><span class="ohlc-lbl">TWB C:</span><span class="ohlc-val" id="twb-c">-</span></div>
+      <span id="twb-status" class="twb-tag" style="display: none;"></span>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-section">
+      <select id="code-select" class="select-symbol" onchange="onSymbolDropdownChange()">
+        <option value="XAUUSD.ca_5">XAUUSD 5M (Default)</option>
+        <option value="XAUUSD.ca_15">XAUUSD 15M</option>
+        <option value="XAUUSD.ca_1440">XAUUSD 1D</option>
+      </select>
+
+      <button class="btn" id="refresh-btn" onclick="fetchChartData()">
+        <span id="refresh-icon">🔄</span>
+        <span>Refresh</span>
+      </button>
+
+      <button class="btn" onclick="openTokenModal()">
+        <span>🔑 Token</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Notification Banner -->
+  <div id="notification-banner">
+    <span id="notification-msg"></span>
+    <button class="btn btn-primary" id="demo-mode-btn" style="display:none;" onclick="loadSampleData()">
+      <span>✨ Demo Mode</span>
+    </button>
+  </div>
+
+  <!-- Main Chart Viewport -->
+  <div id="chart-wrapper">
+    <div class="watermark-top-right">CRAZII<span>.COM</span></div>
+    <div class="watermark-center">CRAZII</div>
+    <div class="watermark-bottom-left">CRAZII<span>.COM</span></div>
+
+    <!-- Exact TradingView Stacked Price & Countdown Scale Badge -->
+    <div id="tv-price-scale-badge" class="tv-price-scale-badge">
+      <div class="tv-scale-top-row">
+        <span class="tv-scale-symbol" id="tv-scale-symbol-text">XAUUSD</span>
+        <span class="tv-scale-price" id="tv-scale-price-text">--.--</span>
+      </div>
+      <div class="tv-scale-bottom-row">
+        <span class="tv-scale-countdown-text" id="tv-countdown-time">--:--</span>
+      </div>
+    </div>
+
+    <!-- Floating Legend -->
+    <div class="legend-floating">
+      <div class="legend-item">
+        <div class="swatch swatch-yellow"></div>
+        <span>Bullish (twb_close > twb_open)</span>
+      </div>
+      <div class="legend-item">
+        <div class="swatch swatch-red"></div>
+        <span>Bearish (twb_close < twb_open)</span>
+      </div>
+      <div class="legend-item">
+        <span style="color: #00E5FF; font-weight: bold;">🔹</span>
+        <span>Buy (pivots_buy_strategy_1)</span>
+      </div>
+      <div class="legend-item">
+        <span style="color: #FFA726; font-weight: bold;">🔶</span>
+        <span>Sell (pivots_sell_strategy_1)</span>
+      </div>
+    </div>
+
+    <!-- Sub-Pane Floating Titles -->
+    <div class="pane-label-ksi">BOYS BUYING (KSI)</div>
+    <div class="pane-label-kcx">BEARISHNESS (KCX)</div>
+
+    <!-- Left Badges Container for Line Titles -->
+    <div id="left-badges-container"></div>
+
+    <!-- Chart Canvas Container -->
+    <div id="chart-container"></div>
+  </div>
+
+  <!-- Auth & Refresh Token Configuration Modal -->
+  <div class="modal-overlay" id="token-modal">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 class="modal-title">🔐 Crazii Authentication & Auto-Refresh</h3>
+        <button class="btn" onclick="closeTokenModal()">&times;</button>
+      </div>
+
+      <!-- Status Summary Cards -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+        <div style="background: #0f121a; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px;">
+          <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">ACCESS TOKEN (15M)</div>
+          <div id="modal-access-status" style="font-size: 12px; font-weight: 700; margin-top: 2px; color: #00E676;">Active</div>
+          <div style="font-size: 9.5px; color: var(--text-muted); margin-top: 2px;">Tự gia hạn ngầm mỗi 12m 🔄</div>
+        </div>
+
+        <div style="background: #0f121a; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px;">
+          <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">REFRESH TOKEN (3 DAYS)</div>
+          <div id="modal-refresh-status" style="font-size: 12px; font-weight: 700; margin-top: 2px; color: #00E5FF;">Active</div>
+          <div style="font-size: 9.5px; color: var(--text-muted); margin-top: 2px;">Cấp mới Access Token liên tục</div>
+        </div>
+      </div>
+
+      <!-- Refresh Token Input Form -->
+      <div style="margin-bottom: 12px;">
+        <label style="font-size: 11px; font-weight: 700; color: #ffffff; display: flex; justify-content: space-between;">
+          <span>🔑 Crazii Refresh Token (Hạn 3 Ngày)</span>
+          <span style="color: var(--accent-green); font-size: 10px; font-weight: 700;">Khuyên dùng</span>
+        </label>
+        <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-top: 3px; margin-bottom: 6px;">
+          Dán mã Refresh Token (<code>typ: Refresh</code>) lấy từ crazii.com. Chỉ cần dán 1 lần duy nhất mỗi 3 ngày, server sẽ tự động cấp mới Access Token liên tục để biểu đồ không bao giờ bị dừng.
+        </p>
+        <input type="text" id="refresh-token-input" class="input-field" style="margin-bottom: 6px;" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IlJlZnJlc2giLC..." />
+      </div>
+
+      <div id="token-modal-alert" style="display:none; font-size: 11px; padding: 6px 10px; border-radius: 4px; margin-bottom: 10px;"></div>
+
+      <!-- Quick Action Buttons -->
+      <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <button class="btn" id="btn-manual-refresh" onclick="triggerManualRefresh()" style="background: #1e283d; color: #90caf9; border-color: rgba(41, 98, 255, 0.4);">
+          <span id="manual-refresh-icon">🔄</span>
+          <span>Refresh Access Token Ngay</span>
+        </button>
+
+        <div style="display: flex; gap: 6px;">
+          <button class="btn" onclick="closeTokenModal()">Đóng</button>
+          <button class="btn btn-primary" id="btn-save-token" onclick="saveRefreshTokenFromModal()">Lưu & Kích hoạt</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Application State ---
+    let chart = null;
+    let candleSeries = null;
+    let ksiSeries = null;
+    let kcxSeries = null;
+    let rawCandleMap = new Map();
+    let currentCode = 'XAUUSD.ca_5';
+    let currentTfLabel = '5m';
+    let currentTimeframeMinutes = 5;
+    let currentBarTimestamp = 0; // Unix time in seconds of the latest forming candle
+    let activePriceLines = [];
+    let localSocket = null;
+    let currentLatestCandle = null;
+
+    // --- Color Constants ---
+    const BULLISH_COLOR = '#FFEB3B'; // Yellow
+    const BEARISH_COLOR = '#FF0000'; // Red
+    const NEUTRAL_COLOR = '#FFEB3B';
+
+    /**
+     * Exact Price Line Mapping Specs
+     */
+    const PRICE_LINE_SPECS = [
+      { key: 'op_line', title: 'OP', color: '#ECEFF1', bgColor: '#ECEFF1', textColor: '#000000', lineStyle: 2 },
+      { key: 'ma_200', title: '200MA', color: '#FFA726', bgColor: '#FFA726', textColor: '#000000', lineStyle: 0 },
+      { key: 'wma', title: '30MA', color: '#00E676', bgColor: '#00E676', textColor: '#000000', lineStyle: 0 },
+      { key: 'mlp_line', title: 'MLP', color: '#D7CCC8', bgColor: '#D7CCC8', textColor: '#000000', lineStyle: 0 },
+      { key: 'ktr_plus_3', title: 'KTR+3', color: '#FFEB3B', bgColor: '#FFEB3B', textColor: '#000000', lineStyle: 0 },
+      { key: 'ktr_plus_2', title: 'KTR+2', color: '#FFEB3B', bgColor: '#FFEB3B', textColor: '#000000', lineStyle: 2 },
+      { key: 'ktr_plus_1', title: 'KTR+1', color: '#00E676', bgColor: '#00E676', textColor: '#000000', lineStyle: 2 },
+      { key: 'ktr_minus_1', title: 'KTR-1', color: '#00E676', bgColor: '#00E676', textColor: '#000000', lineStyle: 0 },
+      { key: 'ktr_minus_2', title: 'KTR-2', color: '#FFEB3B', bgColor: '#FFEB3B', textColor: '#000000', lineStyle: 0 },
+      { key: 'ktf_minus_3', altKey: 'ktr_minus_3', title: 'KTR-3', color: '#FF9800', bgColor: '#FFB74D', textColor: '#000000', lineStyle: 1 },
+      { key: 'pivot_2', altKey: 'pivot_02', title: 'Pivot 02', color: '#E040FB', bgColor: '#FF007F', textColor: '#FFFFFF', lineStyle: 0 },
+      { key: 'pivot_1', title: 'Pivot 01', color: '#00E5FF', bgColor: '#80DEEA', textColor: '#000000', lineStyle: 0 }
+    ];
+
+    /**
+     * 1. Initialize Lightweight Chart with Multi-Pane Simulation via scaleMargins
+     */
+    function initChart() {
+      const container = document.getElementById('chart-container');
+      if (!container || !window.LightweightCharts) return;
+
+      chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: container.clientHeight,
+        layout: {
+          background: { color: '#0b0e14' },
+          textColor: '#d1d4dc',
+          fontFamily: "'Plus Jakarta Sans', sans-serif",
+          fontSize: 11,
+        },
+        grid: {
+          vertLines: { color: 'rgba(255, 255, 255, 0.04)' },
+          horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
+        },
+        crosshair: {
+          mode: 1,
+          vertLine: { color: '#ffffff', width: 1, style: 2, labelBackgroundColor: '#2962FF' },
+          horzLine: { color: '#ffffff', width: 1, style: 2, labelBackgroundColor: '#2962FF' },
+        },
+        timeScale: {
+          borderColor: '#1e222d',
+          timeVisible: true,
+          secondsVisible: false,
+        },
+        rightPriceScale: {
+          borderColor: '#1e222d',
+          autoScale: true,
+          scaleMargins: {
+            top: 0.05,
+            bottom: 0.40,
+          },
+        },
+      });
+
+      // 1.1 Candlestick Series (Main Pane)
+      const candleOpts = {
+        upColor: BULLISH_COLOR,
+        downColor: BEARISH_COLOR,
+        borderUpColor: BULLISH_COLOR,
+        borderDownColor: BEARISH_COLOR,
+        wickUpColor: BULLISH_COLOR,
+        wickDownColor: BEARISH_COLOR,
+      };
+
+      if (typeof chart.addCandlestickSeries === 'function') {
+        candleSeries = chart.addCandlestickSeries(candleOpts);
+      } else if (typeof chart.addSeries === 'function') {
+        candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, candleOpts);
+      }
+
+      // 1.2 KSI Histogram Series (Middle Sub-Pane)
+      const ksiOpts = {
+        priceScaleId: 'ksi_scale',
+        priceFormat: { type: 'volume' },
+      };
+
+      if (typeof chart.addHistogramSeries === 'function') {
+        ksiSeries = chart.addHistogramSeries(ksiOpts);
+      } else if (typeof chart.addSeries === 'function') {
+        ksiSeries = chart.addSeries(LightweightCharts.HistogramSeries, ksiOpts);
+      }
+
+      chart.priceScale('ksi_scale').applyOptions({
+        scaleMargins: {
+          top: 0.65,
+          bottom: 0.20,
+        },
+        visible: false,
+      });
+
+      // 1.3 KCX Histogram Series (Bottom Sub-Pane)
+      const kcxOpts = {
+        priceScaleId: 'kcx_scale',
+        priceFormat: { type: 'volume' },
+      };
+
+      if (typeof chart.addHistogramSeries === 'function') {
+        kcxSeries = chart.addHistogramSeries(kcxOpts);
+      } else if (typeof chart.addSeries === 'function') {
+        kcxSeries = chart.addSeries(LightweightCharts.HistogramSeries, kcxOpts);
+      }
+
+      chart.priceScale('kcx_scale').applyOptions({
+        scaleMargins: {
+          top: 0.85,
+          bottom: 0.00,
+        },
+        visible: false,
+      });
+
+      // Crosshair Move Handler
+      chart.subscribeCrosshairMove(param => {
+        if (!param || !param.time) return;
+
+        let candle = null;
+        if (param.seriesData && candleSeries) {
+          candle = param.seriesData.get(candleSeries);
+        } else if (param.seriesPrices && candleSeries) {
+          candle = param.seriesPrices.get(candleSeries);
+        }
+
+        if (candle) {
+          document.getElementById('ohlc-o').innerText = Number(candle.open).toFixed(2);
+          document.getElementById('ohlc-h').innerText = Number(candle.high).toFixed(2);
+          document.getElementById('ohlc-l').innerText = Number(candle.low).toFixed(2);
+          document.getElementById('ohlc-c').innerText = Number(candle.close).toFixed(2);
+
+          const raw = rawCandleMap.get(param.time);
+          if (raw) {
+            const twbOpen = parseFloat(raw.twb_open);
+            const twbClose = parseFloat(raw.twb_close);
+            document.getElementById('twb-o').innerText = isNaN(twbOpen) ? '-' : twbOpen.toFixed(2);
+            document.getElementById('twb-c').innerText = isNaN(twbClose) ? '-' : twbClose.toFixed(2);
+
+            const statusEl = document.getElementById('twb-status');
+            statusEl.style.display = 'inline-block';
+            if (twbClose > twbOpen) {
+              statusEl.className = 'twb-tag twb-bullish';
+              statusEl.innerText = '🟡 BULLISH';
+            } else if (twbClose < twbOpen) {
+              statusEl.className = 'twb-tag twb-bearish';
+              statusEl.innerText = '🔴 BEARISH';
+            } else {
+              statusEl.className = 'twb-tag';
+              statusEl.innerText = '⚪ NEUTRAL';
+            }
+          }
+        }
+      });
+
+      chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+        updateLeftBadgesPositions();
+        updateTvCountdownPosition();
+      });
+
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        updateLeftBadgesPositions();
+        updateTvCountdownPosition();
+      });
+
+      window.addEventListener('resize', () => {
+        if (chart && container) {
+          chart.applyOptions({
+            width: container.clientWidth,
+            height: container.clientHeight,
+          });
+          updateLeftBadgesPositions();
+          updateTvCountdownPosition();
+        }
+      });
+    }
+
+    /**
+     * Timestamp Parser
+     */
+    function parseTimestampToSeconds(ts) {
+      if (typeof ts === 'number') {
+        return ts > 1e11 ? Math.floor(ts / 1000) : Math.floor(ts);
+      }
+      if (typeof ts === 'string') {
+        const trimmed = ts.trim();
+        const parts = trimmed.split(/[\sT]+/);
+        if (parts.length >= 2) {
+          const datePart = parts[0].split(/[.\-/]/).map(Number);
+          const timePart = parts[1].split(':').map(Number);
+          if (datePart.length === 3 && timePart.length >= 2) {
+            const [y, m, d] = datePart;
+            const hh = timePart[0] || 0, mm = timePart[1] || 0, ss = timePart[2] || 0;
+            return Math.floor(Date.UTC(y, m - 1, d, hh, mm, ss) / 1000);
+          }
+        }
+        const parsed = Date.parse(trimmed);
+        if (!isNaN(parsed)) return Math.floor(parsed / 1000);
+      }
+      return Math.floor(Date.now() / 1000);
+    }
+
+    /**
+     * Dynamic Price Lines Rendering
+     */
+    function renderDynamicPriceLines(lastItem) {
+      if (!candleSeries || !lastItem) return;
+
+      for (const line of activePriceLines) {
+        try {
+          candleSeries.removePriceLine(line);
+        } catch (e) {}
+      }
+      activePriceLines = [];
+
+      const badgesContainer = document.getElementById('left-badges-container');
+      badgesContainer.innerHTML = '';
+
+      for (const spec of PRICE_LINE_SPECS) {
+        let priceVal = lastItem[spec.key];
+        if (priceVal === undefined && spec.altKey) {
+          priceVal = lastItem[spec.altKey];
+        }
+
+        const price = parseFloat(priceVal);
+        if (isNaN(price)) continue;
+
+        try {
+          const priceLine = candleSeries.createPriceLine({
+            price: price,
+            color: spec.color,
+            lineWidth: 1,
+            lineStyle: spec.lineStyle !== undefined ? spec.lineStyle : 0,
+            axisLabelVisible: true,
+            title: spec.title,
+          });
+          activePriceLines.push(priceLine);
+
+          const badge = document.createElement('div');
+          badge.className = 'left-badge';
+          badge.innerText = spec.title;
+          badge.style.backgroundColor = spec.bgColor || spec.color;
+          badge.style.color = spec.textColor || '#000000';
+          badge.dataset.price = price;
+          badgesContainer.appendChild(badge);
+        } catch (err) {
+          console.warn('Error creating price line for', spec.title, err);
+        }
+      }
+
+      setTimeout(updateLeftBadgesPositions, 50);
+    }
+
+    function updateLeftBadgesPositions() {
+      if (!candleSeries) return;
+      const badges = document.querySelectorAll('.left-badge');
+      for (const badge of badges) {
+        const price = parseFloat(badge.dataset.price);
+        if (!isNaN(price) && typeof candleSeries.priceToCoordinate === 'function') {
+          const coord = candleSeries.priceToCoordinate(price);
+          if (coord !== null && coord !== undefined && coord >= 0) {
+            badge.style.top = `${coord}px`;
+            badge.style.display = 'block';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+      }
+    }
+
+    function applySignalMarkers(markers) {
+      if (!candleSeries) return;
+      try {
+        if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+          LightweightCharts.createSeriesMarkers(candleSeries, markers);
+        } else if (typeof candleSeries.setMarkers === 'function') {
+          candleSeries.setMarkers(markers);
+        }
+      } catch (err) {
+        console.warn('Error setting markers:', err);
+      }
+    }
+
+    /**
+     * Map Data, Signals & Histograms
+     */
+    function processAndRenderDataset(dataArray) {
+      if (!Array.isArray(dataArray) || dataArray.length === 0) return;
+
+      rawCandleMap.clear();
+
+      const candleData = [];
+      const ksiData = [];
+      const kcxData = [];
+      const markers = [];
+
+      const sortedArray = [...dataArray].sort((a, b) => {
+        const tA = parseTimestampToSeconds(a.timestamp || a.time);
+        const tB = parseTimestampToSeconds(b.timestamp || b.time);
+        return tA - tB;
+      });
+
+      const seenTimestamps = new Set();
+
+      for (const item of sortedArray) {
+        if (!item || item.open === undefined || item.close === undefined) continue;
+
+        const time = parseTimestampToSeconds(item.timestamp || item.time);
+        if (seenTimestamps.has(time)) continue;
+        seenTimestamps.add(time);
+
+        const open = parseFloat(item.open);
+        const high = parseFloat(item.high);
+        const low = parseFloat(item.low);
+        const close = parseFloat(item.close);
+        const twbOpen = parseFloat(item.twb_open);
+        const twbClose = parseFloat(item.twb_close);
+
+        let candleColor = NEUTRAL_COLOR;
+        if (!isNaN(twbOpen) && !isNaN(twbClose)) {
+          if (twbClose > twbOpen) candleColor = BULLISH_COLOR;
+          else if (twbClose < twbOpen) candleColor = BEARISH_COLOR;
+        }
+
+        rawCandleMap.set(time, item);
+
+        candleData.push({
+          time: time,
+          open: open,
+          high: Math.max(open, close, high),
+          low: Math.min(open, close, low),
+          close: close,
+          color: candleColor,
+          wickColor: candleColor,
+          borderColor: candleColor,
+        });
+
+        // Markers
+        const buySignal = parseFloat(item.pivots_buy_strategy_1);
+        const sellSignal = parseFloat(item.pivots_sell_strategy_1);
+
+        if (!isNaN(buySignal) && buySignal > 0) {
+          markers.push({
+            time: time,
+            position: 'belowBar',
+            color: 'cyan',
+            shape: 'diamond',
+            size: 1,
+          });
+        }
+
+        if (!isNaN(sellSignal) && sellSignal > 0) {
+          markers.push({
+            time: time,
+            position: 'aboveBar',
+            color: 'orange',
+            shape: 'diamond',
+            size: 1,
+          });
+        }
+
+        // Histograms (KSI & KCX)
+        const ksiGreen = parseFloat(item.ksi_green);
+        const ksiRed = parseFloat(item.ksi_red);
+        let ksiVal = 0;
+        let ksiColor = 'rgba(0, 255, 0, 0.8)';
+
+        if (!isNaN(ksiGreen) && ksiGreen > 0) {
+          ksiVal = ksiGreen;
+          ksiColor = 'rgba(0, 255, 0, 0.8)';
+        } else if (!isNaN(ksiRed) && ksiRed > 0) {
+          ksiVal = ksiRed;
+          ksiColor = 'rgba(255, 0, 0, 0.8)';
+        }
+
+        ksiData.push({
+          time: time,
+          value: ksiVal,
+          color: ksiColor,
+        });
+
+        const kcxVal = parseFloat(item.kcx);
+        kcxData.push({
+          time: time,
+          value: isNaN(kcxVal) ? 0 : kcxVal,
+          color: '#00BFFF',
+        });
+      }
+
+      if (candleSeries) candleSeries.setData(candleData);
+      if (ksiSeries) ksiSeries.setData(ksiData);
+      if (kcxSeries) kcxSeries.setData(kcxData);
+
+      applySignalMarkers(markers);
+
+      if (sortedArray.length > 0) {
+        const lastItem = sortedArray[sortedArray.length - 1];
+        renderDynamicPriceLines(lastItem);
+
+        // Update Header OHLC
+        document.getElementById('ohlc-o').innerText = Number(lastItem.open).toFixed(2);
+        document.getElementById('ohlc-h').innerText = Number(lastItem.high).toFixed(2);
+        document.getElementById('ohlc-l').innerText = Number(lastItem.low).toFixed(2);
+        document.getElementById('ohlc-c').innerText = Number(lastItem.close).toFixed(2);
+
+        // Store latest candle state
+        const lastTime = parseTimestampToSeconds(lastItem.timestamp || lastItem.time);
+        currentBarTimestamp = lastTime;
+        const twbOpen = parseFloat(lastItem.twb_open);
+        const twbClose = parseFloat(lastItem.twb_close);
+
+        currentLatestCandle = {
+          time: lastTime,
+          open: parseFloat(lastItem.open),
+          high: parseFloat(lastItem.high),
+          low: parseFloat(lastItem.low),
+          close: parseFloat(lastItem.close),
+          twbOpen: twbOpen,
+          twbClose: twbClose,
+          color: twbClose > twbOpen ? BULLISH_COLOR : BEARISH_COLOR,
+        };
+      }
+
+      chart.timeScale().fitContent();
+      setTimeout(() => {
+        updateLeftBadgesPositions();
+        updateTvCountdownPosition();
+      }, 50);
+    }
+
+    /**
+     * Fetch Live Data from Proxy (Initial Historical Load)
+     */
+    async function fetchChartData() {
+      const banner = document.getElementById('notification-banner');
+      const refreshBtn = document.getElementById('refresh-btn');
+      const refreshIcon = document.getElementById('refresh-icon');
+      const demoBtn = document.getElementById('demo-mode-btn');
+
+      refreshIcon.innerHTML = '<span class="spinner"></span>';
+      refreshBtn.disabled = true;
+
+      // Purge any stale legacy localStorage token so server manages tokens cleanly
+      localStorage.removeItem('crazii_auth_token');
+
+      let url = `/api/candles?code=${encodeURIComponent(currentCode)}`;
+
+      try {
+        const response = await fetch(url);
+        const result = await response.json();
+
+        if (!response.ok) {
+          banner.className = 'error';
+          banner.style.display = 'flex';
+          document.getElementById('notification-msg').innerHTML = `
+            <strong>API (${currentCode}):</strong> ${result.message || 'Authentication required.'}
+          `;
+          demoBtn.style.display = 'inline-flex';
+          return;
+        }
+
+        let list = [];
+        if (Array.isArray(result)) list = result;
+        else if (Array.isArray(result.data)) list = result.data;
+        else if (Array.isArray(result.candles)) list = result.candles;
+        else if (result.success && Array.isArray(result.result)) list = result.result;
+
+        if (list.length === 0) {
+          banner.className = 'info';
+          banner.style.display = 'flex';
+          document.getElementById('notification-msg').innerText = `Connected, but received 0 candle records for ${currentCode}.`;
+          demoBtn.style.display = 'inline-flex';
+          return;
+        }
+
+        banner.style.display = 'none';
+        processAndRenderDataset(list);
+
+        // Tell local WebSocket to subscribe to this channel
+        if (localSocket && localSocket.connected) {
+          localSocket.emit('subscribe', currentCode);
+          localSocket.emit('subscribe', 'price');
+        }
+      } catch (err) {
+        console.error('Fetch error:', err);
+        banner.className = 'error';
+        banner.style.display = 'flex';
+        document.getElementById('notification-msg').innerText = `Proxy unreachable: ${err.message}. Ensure 'node server.js' is running.`;
+        demoBtn.style.display = 'inline-flex';
+      } finally {
+        refreshIcon.innerHTML = '🔄';
+        refreshBtn.disabled = false;
+      }
+    }
+
+    /**
+     * =========================================================================
+     * WebSocket Real-time Updates via Socket.IO
+     * =========================================================================
+     */
+    function initWebSocket() {
+      if (localSocket) {
+        try { localSocket.close(); } catch (e) {}
+      }
+
+      localSocket = io({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        randomizationFactor: 0.5,
+        timeout: 10000
+      });
+
+      const wsBadge = document.getElementById('ws-badge');
+      const wsText = document.getElementById('ws-status-text');
+
+      function updateWsUI(state, text) {
+        wsBadge.classList.remove('reconnecting', 'disconnected');
+        if (state === 'live') {
+          wsText.innerText = text || 'WS Live';
+        } else if (state === 'reconnecting') {
+          wsBadge.classList.add('reconnecting');
+          wsText.innerText = text || 'WS Reconnecting...';
+        } else if (state === 'disconnected') {
+          wsBadge.classList.add('disconnected');
+          wsText.innerText = text || 'WS Disconnected';
+        }
+      }
+
+      localSocket.on('connect', () => {
+        updateWsUI('live', 'WS Live');
+        localSocket.emit('subscribe', 'price');
+        localSocket.emit('subscribe', currentCode);
+      });
+
+      // Socket.IO client auto-reconnect events
+      if (localSocket.io) {
+        localSocket.io.on('reconnect_attempt', (attempt) => {
+          updateWsUI('reconnecting', `WS Retrying #${attempt}...`);
+        });
+
+        localSocket.io.on('reconnect', (attempt) => {
+          updateWsUI('live', 'WS Live');
+          localSocket.emit('subscribe', 'price');
+          localSocket.emit('subscribe', currentCode);
+          // Auto-resync chart dataset to ensure no missing candles during disconnect
+          fetchChartData();
+        });
+
+        localSocket.io.on('reconnect_error', () => {
+          updateWsUI('reconnecting', 'WS Retrying...');
+        });
+      }
+
+      localSocket.on('disconnect', (reason) => {
+        updateWsUI('disconnected', 'WS Disconnected');
+      });
+
+      // Upstream Relay Status from server.js
+      localSocket.on('upstream_status', (status) => {
+        if (status.connected) {
+          updateWsUI('live', 'WS Live');
+        } else if (status.reconnecting) {
+          updateWsUI('reconnecting', `Upstream Retrying #${status.attempt || 1}...`);
+        } else {
+          updateWsUI('reconnecting', 'Upstream Disconnected');
+        }
+      });
+
+      // Listen for token auto-refreshed event
+      localSocket.on('token_refreshed', (data) => {
+        console.log('[Token Event] Server auto-renewed token:', data);
+        fetchTokenInfo();
+      });
+
+      // 1. Listen for full candle CSV 'data' events
+      localSocket.on('data', (csvPayload) => {
+        handleIncomingWsCsv(csvPayload);
+      });
+
+      // 2. Listen for sub-second tick 'price' events
+      localSocket.on('price', (symbol, priceStr) => {
+        handleIncomingWsPrice(symbol, priceStr);
+      });
+
+      // Reconnect when browser comes back online
+      window.addEventListener('online', () => {
+        console.log('[Network] Browser is online. Ensuring WS is connected...');
+        if (localSocket && !localSocket.connected) {
+          localSocket.connect();
+        }
+        fetchChartData();
+        fetchTokenInfo();
+      });
+
+      window.addEventListener('offline', () => {
+        console.warn('[Network] Browser is offline.');
+        updateWsUI('disconnected', 'Offline');
+      });
+    }
+
+    /**
+     * Strict CSV Parser & Real-time Update Handler
+     */
+    function handleIncomingWsCsv(csvPayload) {
+      if (typeof csvPayload !== 'string') return;
+      const parts = csvPayload.split(',');
+      if (parts.length < 13) return;
+
+      // Extract Fields based on Exact Indices:
+      // [2] = Symbol, [3] = Timeframe, [4] = Timestamp ("YYYY.MM.DD HH:mm")
+      // [5] = TWB_Open, [8] = TWB_Close
+      // [9] = Open, [10] = High, [11] = Low, [12] = Close
+      const symbol = parts[2]?.trim();
+      const timeframe = parts[3]?.trim();
+      const timestampStr = parts[4]?.trim();
+      const twbOpen = parseFloat(parts[5]);
+      const twbClose = parseFloat(parts[8]);
+      const open = parseFloat(parts[9]);
+      const high = parseFloat(parts[10]);
+      const low = parseFloat(parts[11]);
+      const close = parseFloat(parts[12]);
+
+      const expectedSymbol = currentCode.split('_')[0]; // e.g. "XAUUSD.ca"
+      const expectedTf = currentCode.split('_')[1];     // e.g. "5"
+
+      if (symbol === expectedSymbol && timeframe === expectedTf) {
+        const time = parseTimestampToSeconds(timestampStr);
+        const candleColor = twbClose > twbOpen ? BULLISH_COLOR : BEARISH_COLOR;
+
+        const liveCandle = {
+          time: time,
+          open: open,
+          high: Math.max(open, close, high),
+          low: Math.min(open, close, low),
+          close: close,
+          color: candleColor,
+          wickColor: candleColor,
+          borderColor: candleColor
+        };
+
+        // Real-time Candlestick Update on Chart
+        if (candleSeries) {
+          candleSeries.update(liveCandle);
+        }
+
+        currentLatestCandle = { ...liveCandle, twbOpen, twbClose };
+        currentBarTimestamp = time;
+        currentTimeframeMinutes = parseInt(timeframe, 10) || 5;
+
+        // Update Header OHLC
+        document.getElementById('ohlc-o').innerText = open.toFixed(2);
+        document.getElementById('ohlc-h').innerText = high.toFixed(2);
+        document.getElementById('ohlc-l').innerText = low.toFixed(2);
+        document.getElementById('ohlc-c').innerText = close.toFixed(2);
+        document.getElementById('twb-o').innerText = isNaN(twbOpen) ? '-' : twbOpen.toFixed(2);
+        document.getElementById('twb-c').innerText = isNaN(twbClose) ? '-' : twbClose.toFixed(2);
+
+        const statusEl = document.getElementById('twb-status');
+        statusEl.style.display = 'inline-block';
+        if (twbClose > twbOpen) {
+          statusEl.className = 'twb-tag twb-bullish';
+          statusEl.innerText = '🟡 BULLISH';
+        } else {
+          statusEl.className = 'twb-tag twb-bearish';
+          statusEl.innerText = '🔴 BEARISH';
+        }
+
+        // Real-time Update for KSI & KCX Histograms (Exact Crazii WebSocket Column Mapping)
+        if (parts.length > 45) {
+          const ksiGreen = parseFloat(parts[44]);
+          const ksiRed = parseFloat(parts[45]);
+          let ksiVal = 0;
+          let ksiColor = 'rgba(0, 255, 0, 0.8)';
+
+          if (!isNaN(ksiGreen) && ksiGreen > 0) {
+            ksiVal = ksiGreen;
+            ksiColor = 'rgba(0, 255, 0, 0.8)';
+          } else if (!isNaN(ksiRed) && ksiRed > 0) {
+            ksiVal = ksiRed;
+            ksiColor = 'rgba(255, 0, 0, 0.8)';
+          }
+          if (ksiSeries) ksiSeries.update({ time, value: ksiVal, color: ksiColor });
+
+          const kcxVal = parseFloat(parts[40]);
+          if (kcxSeries) kcxSeries.update({ time, value: isNaN(kcxVal) ? 0 : kcxVal, color: '#00BFFF' });
+
+          const ksiText = parts[46]?.trim();
+          const kcxText = parts[41]?.trim();
+          if (ksiText) {
+            const ksiLabelEl = document.querySelector('.pane-label-ksi');
+            if (ksiLabelEl) ksiLabelEl.innerText = `${ksiText} (KSI)`;
+          }
+          if (kcxText) {
+            const kcxLabelEl = document.querySelector('.pane-label-kcx');
+            if (kcxLabelEl) kcxLabelEl.innerText = `${kcxText} (KCX)`;
+          }
+        }
+
+        // Real-time Update for Horizontal Price Lines
+        if (parts.length > 35) {
+          const livePriceLineData = {
+            op_line: parts[16],
+            mlp_line: parts[17],
+            ktr_plus_1: parts[18],
+            ktr_plus_2: parts[19],
+            ktr_plus_3: parts[20],
+            ktr_minus_1: parts[21],
+            ktr_minus_2: parts[22],
+            ktf_minus_3: parts[23],
+            pivot_1: parts[24],
+            pivot_2: parts[25],
+            wma: parts[33],
+            ma_200: parts[35]
+          };
+          renderDynamicPriceLines(livePriceLineData);
+        }
+      }
+    }
+
+    /**
+     * Sub-second Live Tick Price Handler
+     */
+    function handleIncomingWsPrice(symbol, priceStr) {
+      const expectedSymbol = currentCode.split('_')[0]; // "XAUUSD.ca"
+      if (symbol !== expectedSymbol) return;
+
+      const price = parseFloat(priceStr);
+      if (isNaN(price)) return;
+
+      const closeEl = document.getElementById('ohlc-c');
+      const prevPrice = parseFloat(closeEl.innerText);
+      
+      // Update Close value and flash color
+      closeEl.innerText = price.toFixed(2);
+      if (!isNaN(prevPrice)) {
+        if (price > prevPrice) {
+          closeEl.className = 'ohlc-val flash-up';
+        } else if (price < prevPrice) {
+          closeEl.className = 'ohlc-val flash-down';
+        }
+        setTimeout(() => { closeEl.className = 'ohlc-val'; }, 400);
+      }
+
+      // If we have a forming candle, update high, low, close in real time
+      if (currentLatestCandle && candleSeries) {
+        currentLatestCandle.close = price;
+        currentLatestCandle.high = Math.max(currentLatestCandle.high, price);
+        currentLatestCandle.low = Math.min(currentLatestCandle.low, price);
+        
+        // Recompute color if needed
+        const isBull = currentLatestCandle.twbClose >= currentLatestCandle.twbOpen;
+        currentLatestCandle.color = isBull ? BULLISH_COLOR : BEARISH_COLOR;
+        currentLatestCandle.wickColor = currentLatestCandle.color;
+        currentLatestCandle.borderColor = currentLatestCandle.color;
+
+        candleSeries.update(currentLatestCandle);
+        document.getElementById('ohlc-h').innerText = currentLatestCandle.high.toFixed(2);
+        document.getElementById('ohlc-l').innerText = currentLatestCandle.low.toFixed(2);
+        updateTvCountdownPosition();
+      }
+    }
+
+    /**
+     * =========================================================================
+     * TradingView-Style Countdown to Bar Close Timer
+     * =========================================================================
+     */
+    function updateTvCountdownPosition() {
+      const badge = document.getElementById('tv-price-scale-badge');
+      if (!badge || !candleSeries || !currentLatestCandle || isNaN(currentLatestCandle.close)) return;
+
+      try {
+        const yCoord = candleSeries.priceToCoordinate(currentLatestCandle.close);
+        const chartWrapper = document.getElementById('chart-wrapper');
+        const height = chartWrapper ? chartWrapper.clientHeight : 600;
+
+        if (yCoord !== null && yCoord !== undefined && !isNaN(yCoord)) {
+          const clampedY = Math.max(20, Math.min(height - 40, yCoord));
+          badge.style.top = `${Math.round(clampedY)}px`;
+          badge.style.display = 'flex';
+        }
+
+        // Update live price and symbol text
+        const priceEl = document.getElementById('tv-scale-price-text');
+        const symbolEl = document.getElementById('tv-scale-symbol-text');
+        if (priceEl) priceEl.innerText = Number(currentLatestCandle.close).toFixed(2);
+        if (symbolEl) {
+          const symName = (currentCode || 'XAUUSD').split('.')[0].replace('_', '');
+          symbolEl.innerText = symName;
+        }
+
+        // Style badge based on bullish / bearish state
+        const isBull = currentLatestCandle.twbClose >= currentLatestCandle.twbOpen;
+        badge.classList.remove('bullish', 'bearish');
+        if (isBull) {
+          badge.classList.add('bullish');
+        } else {
+          badge.classList.add('bearish');
+        }
+      } catch (e) {}
+    }
+
+    function startBarCountdownTimer() {
+      function tick() {
+        const scaleTimeEl = document.getElementById('tv-countdown-time');
+        const headerTimeEl = document.getElementById('tv-header-countdown');
+
+        const tfMinutes = currentTimeframeMinutes || 5;
+        let remainingSec = 0;
+
+        const now = new Date();
+        const currentSeconds = now.getSeconds();
+        const currentMinutes = now.getMinutes();
+
+        if (tfMinutes < 60) {
+          // Minute timeframes (1m, 3m, 5m, 15m, 30m): Closes on exact minute boundaries
+          const elapsedInBar = (currentMinutes % tfMinutes) * 60 + currentSeconds;
+          remainingSec = (tfMinutes * 60) - elapsedInBar;
+        } else if (tfMinutes === 60) {
+          // 1 Hour
+          const elapsedInBar = currentMinutes * 60 + currentSeconds;
+          remainingSec = 3600 - elapsedInBar;
+        } else if (tfMinutes >= 1440) {
+          // 1 Day (Daily Bar closes at 00:00 UTC)
+          const nowUtc = new Date();
+          const utcHours = nowUtc.getUTCHours();
+          const utcMins = nowUtc.getUTCMinutes();
+          const utcSecs = nowUtc.getUTCSeconds();
+          const elapsedInDay = (utcHours * 3600) + (utcMins * 60) + utcSecs;
+          remainingSec = 86400 - elapsedInDay;
+        } else {
+          // General fallback
+          const totalSec = tfMinutes * 60;
+          const epochSec = Math.floor(Date.now() / 1000);
+          remainingSec = totalSec - (epochSec % totalSec);
+        }
+
+        if (remainingSec <= 0) remainingSec = 0;
+
+        let formatted = '';
+        if (tfMinutes >= 1440) {
+          const hours = Math.floor(remainingSec / 3600).toString().padStart(2, '0');
+          const mins = Math.floor((remainingSec % 3600) / 60).toString().padStart(2, '0');
+          const secs = Math.floor(remainingSec % 60).toString().padStart(2, '0');
+          formatted = `${hours}:${mins}:${secs}`;
+        } else {
+          const mins = Math.floor(remainingSec / 60).toString().padStart(2, '0');
+          const secs = Math.floor(remainingSec % 60).toString().padStart(2, '0');
+          formatted = `${mins}:${secs}`;
+        }
+
+        if (scaleTimeEl) scaleTimeEl.innerText = formatted;
+        if (headerTimeEl) headerTimeEl.innerText = `(${formatted})`;
+
+        updateTvCountdownPosition();
+      }
+
+      tick();
+      setInterval(tick, 1000);
+    }
+
+    /**
+     * Demo Mode Generator
+     */
+    function loadSampleData() {
+      const banner = document.getElementById('notification-banner');
+      banner.className = 'info';
+      banner.style.display = 'flex';
+      document.getElementById('notification-msg').innerHTML = `
+        <strong>Demo Mode (${currentTfLabel}):</strong> Generating simulated candles with real-time ticker emulation.
+      `;
+      document.getElementById('demo-mode-btn').style.display = 'none';
+
+      const intervalSec = currentTimeframeMinutes * 60;
+      const demoList = [];
+      let basePrice = 4440.00;
+      const now = Math.floor(Date.now() / 1000);
+
+      for (let i = 120; i >= 0; i--) {
+        const time = now - (i * intervalSec);
+        let change = (Math.random() * 3.5 - 1.7);
+
+        if (i >= 8 && i <= 15) change = - (Math.random() * 6 + 3);
+        else if (i < 8) change = (Math.random() * 4 + 1);
+
+        const open = basePrice;
+        const close = open + change;
+        const high = Math.max(open, close) + Math.random() * 2;
+        const low = Math.min(open, close) - Math.random() * 2;
+
+        const isBullish = i < 8 ? true : (i >= 8 && i <= 15 ? false : close > open);
+        const twbOpen = open;
+        const twbClose = isBullish ? twbOpen + 1.2 : twbOpen - 1.2;
+
+        const ksiGreen = isBullish ? (Math.random() * 3.5 + 0.5) : 0;
+        const ksiRed = !isBullish ? (Math.random() * 3.5 + 0.5) : 0;
+        const kcx = - (Math.random() * 250 + 40);
+
+        const buySignal = (i % 12 === 0) ? 1 : 0;
+        const sellSignal = (i % 15 === 0) ? 1 : 0;
+
+        demoList.push({
+          timestamp: new Date(time * 1000).toISOString(),
+          open: open,
+          high: high,
+          low: low,
+          close: close,
+          twb_open: twbOpen,
+          twb_close: twbClose,
+          op_line: 4472.68,
+          mlp_line: 4429.76,
+          ktr_plus_3: 4526.35,
+          ktr_plus_2: 4508.46,
+          ktr_plus_1: 4490.57,
+          ktr_minus_1: 4454.79,
+          ktr_minus_2: 4436.90,
+          ktf_minus_3: 4419.01,
+          pivot_2: 4494.33,
+          pivot_1: 4329.11,
+          ma_200: 4457.13,
+          wma: 4439.87,
+          pivots_buy_strategy_1: buySignal,
+          pivots_sell_strategy_1: sellSignal,
+          ksi_green: ksiGreen,
+          ksi_red: ksiRed,
+          kcx: kcx,
+        });
+
+        basePrice = close;
+      }
+
+      processAndRenderDataset(demoList);
+    }
+
+    /**
+     * Timeframe Switch
+     */
+    function setTimeframe(code, label, btnEl) {
+      currentCode = code;
+      currentTfLabel = label;
+
+      if (label === '5m') currentTimeframeMinutes = 5;
+      else if (label === '15m') currentTimeframeMinutes = 15;
+      else if (label === '1D') currentTimeframeMinutes = 1440;
+
+      document.getElementById('symbol-display').innerText = currentCode;
+
+      document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+      if (btnEl) btnEl.classList.add('active');
+
+      const select = document.getElementById('code-select');
+      if (select) select.value = code;
+
+      fetchChartData();
+    }
+
+    function onSymbolDropdownChange() {
+      const select = document.getElementById('code-select');
+      const val = select.value;
+      let label = '5m';
+      if (val.includes('_15')) label = '15m';
+      else if (val.includes('_1440')) label = '1D';
+
+      setTimeframe(val, label, null);
+    }
+
+    /**
+     * =========================================================================
+     * Token & Auto-Refresh Management
+     * =========================================================================
+     */
+    let tokenInfoState = null;
+
+    async function fetchTokenInfo() {
+      try {
+        const res = await fetch('/api/token-info');
+        if (!res.ok) return;
+        const data = await res.json();
+        tokenInfoState = data;
+        updateTokenUI(data);
+      } catch (e) {
+        console.warn('Failed to fetch token info:', e);
+      }
+    }
+
+    function formatTimeRemaining(seconds) {
+      if (seconds <= 0) return 'Hết hạn';
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      const secs = Math.floor(seconds % 60);
+
+      if (days > 0) return `${days}d ${hours}h`;
+      if (hours > 0) return `${hours}h ${mins}m`;
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function updateTokenUI(info) {
+      if (!info) return;
+      const pill = document.getElementById('token-status-pill');
+      const label = document.getElementById('token-status-label');
+      const accessStatus = document.getElementById('modal-access-status');
+      const refreshStatus = document.getElementById('modal-refresh-status');
+
+      pill.classList.remove('valid', 'expiring', 'expired');
+
+      const accessLeft = info.accessToken?.timeLeftSeconds || 0;
+      const refreshLeft = info.refreshToken?.timeLeftSeconds || 0;
+
+      // Access Token UI
+      if (info.accessToken?.hasToken && !info.accessToken.isExpired) {
+        accessStatus.style.color = accessLeft <= 180 ? '#ffb300' : '#00E676';
+        accessStatus.innerText = `Active (${formatTimeRemaining(accessLeft)})`;
+      } else {
+        accessStatus.style.color = '#ff5252';
+        accessStatus.innerText = 'Expired (Auto-renewing...)';
+      }
+
+      // Refresh Token UI
+      if (info.refreshToken?.hasToken && !info.refreshToken.isExpired) {
+        refreshStatus.style.color = '#00E5FF';
+        refreshStatus.innerText = `Active (${formatTimeRemaining(refreshLeft)})`;
+        document.getElementById('refresh-token-input').placeholder = `Current: ${info.refreshToken.preview}`;
+      } else {
+        refreshStatus.style.color = '#ff5252';
+        refreshStatus.innerText = 'Chưa thiết lập / Hết hạn';
+      }
+
+      // Header Pill UI
+      if (info.accessToken?.hasToken && !info.accessToken.isExpired) {
+        if (accessLeft <= 180) {
+          pill.classList.add('expiring');
+          label.innerText = `🔑 Token: ${formatTimeRemaining(accessLeft)} 🔄`;
+        } else {
+          pill.classList.add('valid');
+          label.innerText = `🔑 Token: ${formatTimeRemaining(accessLeft)}`;
+        }
+      } else if (info.refreshToken?.hasToken && !info.refreshToken.isExpired) {
+        pill.classList.add('expiring');
+        label.innerText = `🔑 Token: Đang cấp mới...`;
+      } else {
+        pill.classList.add('expired');
+        label.innerText = `🔑 Token: Hết hạn (Click nhập)`;
+      }
+    }
+
+    function openTokenModal() {
+      fetchTokenInfo();
+      document.getElementById('token-modal-alert').style.display = 'none';
+      document.getElementById('token-modal').style.display = 'flex';
+    }
+
+    function closeTokenModal() {
+      document.getElementById('token-modal').style.display = 'none';
+    }
+
+    function showTokenAlert(msg, type) {
+      const el = document.getElementById('token-modal-alert');
+      el.style.display = 'block';
+      if (type === 'success') {
+        el.style.background = 'rgba(0, 230, 118, 0.15)';
+        el.style.color = '#00E676';
+        el.style.border = '1px solid rgba(0, 230, 118, 0.3)';
+      } else {
+        el.style.background = 'rgba(255, 0, 0, 0.15)';
+        el.style.color = '#ff8a80';
+        el.style.border = '1px solid rgba(255, 0, 0, 0.3)';
+      }
+      el.innerHTML = msg;
+    }
+
+    async function triggerManualRefresh() {
+      const btn = document.getElementById('btn-manual-refresh');
+      const icon = document.getElementById('manual-refresh-icon');
+      btn.disabled = true;
+      icon.innerHTML = '<span class="spinner"></span>';
+
+      try {
+        const res = await fetch('/api/refresh-token', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const data = await res.json();
+        if (data.success) {
+          showTokenAlert('✅ Đã refresh Access Token thành công! Biểu đồ đang tải lại...', 'success');
+          fetchTokenInfo();
+          fetchChartData();
+        } else {
+          showTokenAlert(`❌ Không thể refresh: ${data.message || 'Lỗi server'}`, 'error');
+        }
+      } catch (err) {
+        showTokenAlert(`❌ Lỗi kết nối: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        icon.innerHTML = '🔄';
+      }
+    }
+
+    async function saveRefreshTokenFromModal() {
+      const input = document.getElementById('refresh-token-input');
+      const tokenVal = input.value.trim();
+      const saveBtn = document.getElementById('btn-save-token');
+
+      if (!tokenVal) {
+        showTokenAlert('⚠️ Vui lòng dán mã Refresh Token hợp lệ từ crazii.com', 'error');
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.innerText = 'Đang lưu & kích hoạt...';
+
+      try {
+        const res = await fetch('/api/set-refresh-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: tokenVal })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showTokenAlert('🎉 Đã lưu Refresh Token và kích hoạt nến thành công!', 'success');
+          input.value = '';
+          fetchTokenInfo();
+          fetchChartData();
+          setTimeout(closeTokenModal, 1200);
+        } else {
+          showTokenAlert(`❌ Lỗi kích hoạt token: ${data.message || 'Token không hợp lệ'}`, 'error');
+        }
+      } catch (err) {
+        showTokenAlert(`❌ Lỗi kết nối: ${err.message}`, 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerText = 'Lưu & Kích hoạt';
+      }
+    }
+
+    // Auto-initialize on Load
+    window.addEventListener('DOMContentLoaded', () => {
+      initChart();
+      initWebSocket();
+      startBarCountdownTimer();
+      fetchTokenInfo();
+      fetchChartData();
+
+      // Periodic check for token expiration status
+      setInterval(fetchTokenInfo, 10000);
+    });
+  </script>
+</body>
+</html>

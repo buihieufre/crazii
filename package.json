@@ -1,0 +1,32 @@
+{
+  "name": "crazii-chart-proxy",
+  "version": "1.0.0",
+  "description": "Node.js Express Proxy & TradingView Lightweight Charts Candlestick App",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "next build",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "lightweight-charts": "^5.2.1",
+    "next": "^16.3.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "ws": "^8.21.3"
+  },
+  "keywords": [
+    "tradingview",
+    "lightweight-charts",
+    "candlestick",
+    "proxy",
+    "cors-bypass"
+  ],
+  "author": "",
+  "license": "ISC"
+}
