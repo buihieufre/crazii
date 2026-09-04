@@ -1,15 +1,15 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { BULLISH_COLOR, BEARISH_COLOR, NEUTRAL_COLOR, PRICE_LINE_SPECS } from '@/lib/chart-constants';
 import { parseTimestampToSeconds } from '@/lib/utils';
+import { updateOhlcHeader } from '@/lib/ohlc-updater';
 import FloatingLegend from './FloatingLegend';
 
 const ChartContainer = forwardRef(function ChartContainer(
   {
     currentCode,
-    countdownText,
-    onCrosshairOHLC,
+    activeSymbolObj,
     ksiLabelText,
     kcxLabelText
   },
@@ -23,20 +23,29 @@ const ChartContainer = forwardRef(function ChartContainer(
   const activePriceLinesRef = useRef([]);
   const rawCandleMapRef = useRef(new Map());
 
-  const [leftBadges, setLeftBadges] = useState([]);
-  const [tvBadgeState, setTvBadgeState] = useState({
-    visible: false,
-    top: 150,
-    price: '--.--',
-    isBullish: true,
-    symbol: 'XAUUSD'
-  });
+  // Direct DOM refs for 60fps zero-react-render badge updates
+  const tvBadgeRef = useRef(null);
+  const tvPriceTextRef = useRef(null);
+  const tvSymbolTextRef = useRef(null);
+  const tvCountdownTextRef = useRef(null);
+  const leftBadgesContainerRef = useRef(null);
 
   const latestCandleRef = useRef(null);
+  const currentCodeRef = useRef(currentCode);
+  currentCodeRef.current = currentCode;
+
+  const decimalsRef = useRef(activeSymbolObj?.decimals || 2);
+  decimalsRef.current = activeSymbolObj?.decimals !== undefined ? activeSymbolObj.decimals : 2;
+
+  // Reset forming candle when symbol changes to prevent stray spikes
+  useEffect(() => {
+    latestCandleRef.current = null;
+    rawCandleMapRef.current.clear();
+  }, [currentCode]);
 
   // Expose API for real-time updates and dataset loading
   useImperativeHandle(ref, () => ({
-    renderDataset(dataArray) {
+    renderDataset(dataArray, isInitial = false) {
       if (!Array.isArray(dataArray) || dataArray.length === 0) return;
       if (!candleSeriesRef.current) return;
 
@@ -68,13 +77,24 @@ const ChartContainer = forwardRef(function ChartContainer(
         const twbOpen = parseFloat(item.twb_open);
         const twbClose = parseFloat(item.twb_close);
 
+        if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) continue;
+
         let candleColor = NEUTRAL_COLOR;
         if (!isNaN(twbOpen) && !isNaN(twbClose)) {
           if (twbClose > twbOpen) candleColor = BULLISH_COLOR;
           else if (twbClose < twbOpen) candleColor = BEARISH_COLOR;
         }
 
-        rawCandleMapRef.current.set(time, item);
+        rawCandleMapRef.current.set(time, {
+          ...item,
+          time,
+          open,
+          high,
+          low,
+          close,
+          twbOpen,
+          twbClose
+        });
 
         candleData.push({
           time: time,
@@ -152,38 +172,36 @@ const ChartContainer = forwardRef(function ChartContainer(
         const lastTime = parseTimestampToSeconds(lastItem.timestamp || lastItem.time);
         const twbOpen = parseFloat(lastItem.twb_open);
         const twbClose = parseFloat(lastItem.twb_close);
+        const open = parseFloat(lastItem.open);
+        const high = parseFloat(lastItem.high);
+        const low = parseFloat(lastItem.low);
+        const close = parseFloat(lastItem.close);
 
         latestCandleRef.current = {
           time: lastTime,
-          open: parseFloat(lastItem.open),
-          high: parseFloat(lastItem.high),
-          low: parseFloat(lastItem.low),
-          close: parseFloat(lastItem.close),
+          open: open,
+          high: Math.max(open, close, high),
+          low: Math.min(open, close, low),
+          close: close,
           twbOpen: twbOpen,
           twbClose: twbClose,
-          color: twbClose > twbOpen ? BULLISH_COLOR : BEARISH_COLOR,
+          color: twbClose >= twbOpen ? BULLISH_COLOR : BEARISH_COLOR,
+          wickColor: twbClose >= twbOpen ? BULLISH_COLOR : BEARISH_COLOR,
+          borderColor: twbClose >= twbOpen ? BULLISH_COLOR : BEARISH_COLOR,
         };
 
-        if (onCrosshairOHLC) {
-          onCrosshairOHLC({
-            open: parseFloat(lastItem.open),
-            high: parseFloat(lastItem.high),
-            low: parseFloat(lastItem.low),
-            close: parseFloat(lastItem.close),
-            twbOpen: twbOpen,
-            twbClose: twbClose
-          });
-        }
+        updateOhlcHeader(latestCandleRef.current, decimalsRef.current);
       }
 
-      if (chartRef.current) {
+      // ONLY fitContent on initial load/switch, NEVER on background polling
+      if (isInitial && chartRef.current) {
         chartRef.current.timeScale().fitContent();
       }
 
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         updateBadgePositions();
         updateTvBadgePosition();
-      }, 50);
+      });
     },
 
     updateLiveCsv(parts) {
@@ -200,18 +218,20 @@ const ChartContainer = forwardRef(function ChartContainer(
       const low = parseFloat(parts[11]);
       const close = parseFloat(parts[12]);
 
-      const expectedSymbol = currentCode.split('_')[0];
-      const expectedTf = currentCode.split('_')[1];
+      if (isNaN(open) || isNaN(close)) return;
+
+      const expectedSymbol = currentCodeRef.current.split('_')[0];
+      const expectedTf = currentCodeRef.current.split('_')[1];
 
       if (symbol === expectedSymbol && timeframe === expectedTf) {
         const time = parseTimestampToSeconds(timestampStr);
-        const candleColor = twbClose > twbOpen ? BULLISH_COLOR : BEARISH_COLOR;
+        const candleColor = twbClose >= twbOpen ? BULLISH_COLOR : BEARISH_COLOR;
 
         const liveCandle = {
           time: time,
           open: open,
-          high: Math.max(open, close, high),
-          low: Math.min(open, close, low),
+          high: Math.max(open, close, isNaN(high) ? open : high),
+          low: Math.min(open, close, isNaN(low) ? open : low),
           close: close,
           color: candleColor,
           wickColor: candleColor,
@@ -219,12 +239,19 @@ const ChartContainer = forwardRef(function ChartContainer(
         };
 
         candleSeriesRef.current.update(liveCandle);
-
         latestCandleRef.current = { ...liveCandle, twbOpen, twbClose };
 
-        if (onCrosshairOHLC) {
-          onCrosshairOHLC({ open, high, low, close, twbOpen, twbClose });
-        }
+        rawCandleMapRef.current.set(time, {
+          time,
+          open,
+          high: liveCandle.high,
+          low: liveCandle.low,
+          close,
+          twbOpen,
+          twbClose
+        });
+
+        updateOhlcHeader(latestCandleRef.current, decimalsRef.current);
 
         // Real-time Update for KSI & KCX
         if (parts.length > 45) {
@@ -265,14 +292,17 @@ const ChartContainer = forwardRef(function ChartContainer(
           renderPriceLines(livePriceLineData);
         }
 
-        updateTvBadgePosition();
+        requestAnimationFrame(updateTvBadgePosition);
       }
     },
 
     updateLiveTickPrice(price) {
       if (!candleSeriesRef.current || !latestCandleRef.current) return;
       const numPrice = parseFloat(price);
-      if (isNaN(numPrice)) return;
+      if (isNaN(numPrice) || numPrice <= 0) return;
+
+      const prevClose = latestCandleRef.current.close;
+      const flash = numPrice > prevClose ? 'flash-up' : numPrice < prevClose ? 'flash-down' : null;
 
       latestCandleRef.current.close = numPrice;
       latestCandleRef.current.high = Math.max(latestCandleRef.current.high, numPrice);
@@ -284,7 +314,9 @@ const ChartContainer = forwardRef(function ChartContainer(
       latestCandleRef.current.borderColor = latestCandleRef.current.color;
 
       candleSeriesRef.current.update(latestCandleRef.current);
-      updateTvBadgePosition();
+
+      updateOhlcHeader({ ...latestCandleRef.current, flash }, decimalsRef.current);
+      requestAnimationFrame(updateTvBadgePosition);
     }
   }));
 
@@ -311,7 +343,8 @@ const ChartContainer = forwardRef(function ChartContainer(
     }
     activePriceLinesRef.current = [];
 
-    const newBadges = [];
+    const container = leftBadgesContainerRef.current;
+    if (container) container.innerHTML = '';
 
     for (const spec of PRICE_LINE_SPECS) {
       let priceVal = item[spec.key];
@@ -333,38 +366,44 @@ const ChartContainer = forwardRef(function ChartContainer(
         });
         activePriceLinesRef.current.push(line);
 
-        newBadges.push({
-          title: spec.title,
-          price: price,
-          color: spec.textColor || '#000000',
-          bgColor: spec.bgColor || spec.color,
-          top: 0,
-          visible: false
-        });
+        if (container) {
+          const badge = document.createElement('div');
+          badge.className = 'left-badge';
+          badge.innerText = spec.title;
+          badge.style.backgroundColor = spec.bgColor || spec.color;
+          badge.style.color = spec.textColor || '#000000';
+          badge.dataset.price = price;
+          badge.style.display = 'none';
+          container.appendChild(badge);
+        }
       } catch (err) {}
     }
 
-    setLeftBadges(newBadges);
-    setTimeout(updateBadgePositions, 50);
+    requestAnimationFrame(updateBadgePositions);
   }
 
   function updateBadgePositions() {
-    if (!candleSeriesRef.current) return;
-    setLeftBadges((prevBadges) =>
-      prevBadges.map((badge) => {
-        try {
-          const coord = candleSeriesRef.current.priceToCoordinate(badge.price);
-          if (coord !== null && coord !== undefined && coord >= 0) {
-            return { ...badge, top: coord, visible: true };
-          }
-        } catch (e) {}
-        return { ...badge, visible: false };
-      })
-    );
+    if (!candleSeriesRef.current || !leftBadgesContainerRef.current) return;
+    const badges = leftBadgesContainerRef.current.querySelectorAll('.left-badge');
+    badges.forEach((badge) => {
+      const price = parseFloat(badge.dataset.price);
+      if (!isNaN(price) && typeof candleSeriesRef.current.priceToCoordinate === 'function') {
+        const coord = candleSeriesRef.current.priceToCoordinate(price);
+        if (coord !== null && coord !== undefined && coord >= 0) {
+          badge.style.top = `${coord}px`;
+          badge.style.display = 'block';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+    });
   }
 
   function updateTvBadgePosition() {
     if (!candleSeriesRef.current || !latestCandleRef.current || isNaN(latestCandleRef.current.close)) return;
+
+    const badge = tvBadgeRef.current;
+    if (!badge) return;
 
     try {
       const yCoord = candleSeriesRef.current.priceToCoordinate(latestCandleRef.current.close);
@@ -372,16 +411,19 @@ const ChartContainer = forwardRef(function ChartContainer(
 
       if (yCoord !== null && yCoord !== undefined && !isNaN(yCoord)) {
         const clampedY = Math.max(20, Math.min(containerHeight - 40, yCoord));
-        const isBull = latestCandleRef.current.twbClose >= latestCandleRef.current.twbOpen;
-        const sym = (currentCode || 'XAUUSD').split('.')[0].replace('_', '');
+        badge.style.top = `${Math.round(clampedY)}px`;
+        badge.style.display = 'flex';
 
-        setTvBadgeState({
-          visible: true,
-          top: Math.round(clampedY),
-          price: Number(latestCandleRef.current.close).toFixed(2),
-          isBullish: isBull,
-          symbol: sym
-        });
+        const isBull = latestCandleRef.current.twbClose >= latestCandleRef.current.twbOpen;
+        badge.className = `tv-price-scale-badge ${isBull ? 'bullish' : 'bearish'}`;
+
+        if (tvPriceTextRef.current) {
+          tvPriceTextRef.current.innerText = Number(latestCandleRef.current.close).toFixed(decimalsRef.current);
+        }
+        if (tvSymbolTextRef.current) {
+          const sym = (currentCodeRef.current || 'XAUUSD').split('.')[0].replace('_', '');
+          tvSymbolTextRef.current.innerText = sym;
+        }
       }
     } catch (e) {}
   }
@@ -494,9 +536,15 @@ const ChartContainer = forwardRef(function ChartContainer(
         visible: false,
       });
 
-      // Crosshair Move Handler
+      // Direct Crosshair Move Handler (Zero Re-render at 60fps)
       chartInstance.subscribeCrosshairMove((param) => {
-        if (!param || !param.time || !cSeries) return;
+        if (!param || !param.time || !cSeries) {
+          // Revert to latest live forming bar when mouse leaves chart
+          if (latestCandleRef.current) {
+            updateOhlcHeader(latestCandleRef.current, decimalsRef.current);
+          }
+          return;
+        }
 
         let candle = null;
         if (param.seriesData && cSeries) {
@@ -505,30 +553,34 @@ const ChartContainer = forwardRef(function ChartContainer(
           candle = param.seriesPrices.get(cSeries);
         }
 
-        if (candle && onCrosshairOHLC) {
+        if (candle) {
           const raw = rawCandleMapRef.current.get(param.time);
-          const twbOpen = raw ? parseFloat(raw.twb_open) : undefined;
-          const twbClose = raw ? parseFloat(raw.twb_close) : undefined;
+          const twbOpen = raw ? raw.twbOpen : undefined;
+          const twbClose = raw ? raw.twbClose : undefined;
 
-          onCrosshairOHLC({
+          updateOhlcHeader({
             open: candle.open,
             high: candle.high,
             low: candle.low,
             close: candle.close,
             twbOpen,
             twbClose
-          });
+          }, decimalsRef.current);
         }
       });
 
       chartInstance.timeScale().subscribeVisibleTimeRangeChange(() => {
-        updateBadgePositions();
-        updateTvBadgePosition();
+        requestAnimationFrame(() => {
+          updateBadgePositions();
+          updateTvBadgePosition();
+        });
       });
 
       chartInstance.timeScale().subscribeVisibleLogicalRangeChange(() => {
-        updateBadgePositions();
-        updateTvBadgePosition();
+        requestAnimationFrame(() => {
+          updateBadgePositions();
+          updateTvBadgePosition();
+        });
       });
 
       const handleResize = () => {
@@ -537,8 +589,10 @@ const ChartContainer = forwardRef(function ChartContainer(
             width: containerRef.current.clientWidth,
             height: containerRef.current.clientHeight,
           });
-          updateBadgePositions();
-          updateTvBadgePosition();
+          requestAnimationFrame(() => {
+            updateBadgePositions();
+            updateTvBadgePosition();
+          });
         }
       };
 
@@ -564,22 +618,21 @@ const ChartContainer = forwardRef(function ChartContainer(
       <div className="watermark-center">CRAZII</div>
       <div className="watermark-bottom-left">CRAZII<span>.COM</span></div>
 
-      {/* Exact TradingView Stacked Price & Countdown Scale Badge */}
-      {tvBadgeState.visible && (
-        <div
-          id="tv-price-scale-badge"
-          className={`tv-price-scale-badge ${tvBadgeState.isBullish ? 'bullish' : 'bearish'}`}
-          style={{ top: `${tvBadgeState.top}px` }}
-        >
-          <div className="tv-scale-top-row">
-            <span className="tv-scale-symbol">{tvBadgeState.symbol}</span>
-            <span className="tv-scale-price">{tvBadgeState.price}</span>
-          </div>
-          <div className="tv-scale-bottom-row">
-            <span className="tv-scale-countdown-text">{countdownText || '--:--'}</span>
-          </div>
+      {/* Exact TradingView Stacked Price & Countdown Scale Badge (Zero Re-render Direct DOM) */}
+      <div
+        id="tv-price-scale-badge"
+        ref={tvBadgeRef}
+        className="tv-price-scale-badge"
+        style={{ display: 'none' }}
+      >
+        <div className="tv-scale-top-row">
+          <span className="tv-scale-symbol" ref={tvSymbolTextRef}>XAUUSD</span>
+          <span className="tv-scale-price" ref={tvPriceTextRef}>--.--</span>
         </div>
-      )}
+        <div className="tv-scale-bottom-row">
+          <span className="tv-scale-countdown-text" ref={tvCountdownTextRef}>--:--</span>
+        </div>
+      </div>
 
       {/* Floating Legend */}
       <FloatingLegend />
@@ -588,25 +641,8 @@ const ChartContainer = forwardRef(function ChartContainer(
       <div className="pane-label-ksi">{ksiLabelText || 'BOYS BUYING (KSI)'}</div>
       <div className="pane-label-kcx">{kcxLabelText || 'BEARISHNESS (KCX)'}</div>
 
-      {/* Left Badges for Dynamic 12 Price Lines */}
-      <div id="left-badges-container">
-        {leftBadges.map(
-          (badge, idx) =>
-            badge.visible && (
-              <div
-                key={idx}
-                className="left-badge"
-                style={{
-                  top: `${badge.top}px`,
-                  backgroundColor: badge.bgColor,
-                  color: badge.color
-                }}
-              >
-                {badge.title}
-              </div>
-            )
-        )}
-      </div>
+      {/* Left Badges Container for Dynamic 12 Price Lines (Direct DOM) */}
+      <div id="left-badges-container" ref={leftBadgesContainerRef}></div>
 
       {/* Chart Canvas */}
       <div id="chart-container" ref={containerRef}></div>

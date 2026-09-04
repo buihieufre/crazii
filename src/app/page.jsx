@@ -5,35 +5,33 @@ import io from 'socket.io-client';
 import Header from '@/components/Header';
 import ChartContainer from '@/components/ChartContainer';
 import TokenModal from '@/components/TokenModal';
+import AssetSelector from '@/components/AssetSelector';
 import { calculateBarCountdown } from '@/lib/utils';
+import { updateHeaderCountdown } from '@/lib/ohlc-updater';
+import { ALL_SYMBOLS, getSymbolByCode } from '@/lib/assets-data';
 
 export default function TerminalPage() {
   const chartRef = useRef(null);
   const socketRef = useRef(null);
 
+  const [activeSymbolObj, setActiveSymbolObj] = useState(ALL_SYMBOLS[0]); // Default XAUUSD.ca
   const [currentCode, setCurrentCode] = useState('XAUUSD.ca_5');
   const [timeframeLabel, setTimeframeLabel] = useState('5m');
   const [timeframeMinutes, setTimeframeMinutes] = useState(5);
-  const [wsStatus, setWsStatus] = useState('live'); // 'live' | 'reconnecting' | 'disconnected'
+  const [wsStatus, setWsStatus] = useState('live'); // 'live' | 'cloud' | 'reconnecting' | 'disconnected'
   const [tokenInfo, setTokenInfo] = useState(null);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
+  const [isAssetSelectorOpen, setIsAssetSelectorOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notification, setNotification] = useState(null);
-  const [countdownText, setCountdownText] = useState('05:00');
   const [ksiLabelText, setKsiLabelText] = useState('BOYS BUYING (KSI)');
   const [kcxLabelText, setKcxLabelText] = useState('BEARISHNESS (KCX)');
 
-  const [ohlc, setOhlc] = useState({
-    open: undefined,
-    high: undefined,
-    low: undefined,
-    close: undefined,
-    twbOpen: undefined,
-    twbClose: undefined,
-    flash: null,
-  });
+  const currentCodeRef = useRef(currentCode);
+  currentCodeRef.current = currentCode;
 
-  const prevPriceRef = useRef(null);
+  const timeframeMinutesRef = useRef(timeframeMinutes);
+  timeframeMinutesRef.current = timeframeMinutes;
 
   // Fetch Token Info from Backend
   const fetchTokenInfo = useCallback(async () => {
@@ -47,8 +45,8 @@ export default function TerminalPage() {
     }
   }, []);
 
-  // Fetch Historical Candles
-  const fetchCandles = useCallback(async (codeToFetch = currentCode, isSilent = false) => {
+  // Fetch Historical Candles On-Demand
+  const fetchCandles = useCallback(async (codeToFetch = currentCode, isSilent = false, isInitial = false) => {
     if (!isSilent) setIsRefreshing(true);
 
     try {
@@ -56,7 +54,6 @@ export default function TerminalPage() {
       const contentType = res.headers.get('content-type') || '';
 
       if (!contentType.includes('application/json')) {
-        const text = await res.text();
         if (!isSilent) {
           setNotification({
             type: 'error',
@@ -97,7 +94,7 @@ export default function TerminalPage() {
       setNotification(null);
 
       if (chartRef.current) {
-        chartRef.current.renderDataset(list);
+        chartRef.current.renderDataset(list, isInitial);
       }
 
       if (socketRef.current && socketRef.current.connected) {
@@ -116,136 +113,158 @@ export default function TerminalPage() {
     }
   }, [currentCode]);
 
-  // Handle Timeframe Switch
+  // Handle Asset Switch from Watchlist (Initial load for selected asset)
+  const handleSelectAsset = useCallback((symbolCode, tfCode, tfName, tfMinutes) => {
+    const symObj = getSymbolByCode(symbolCode);
+    setActiveSymbolObj(symObj);
+    setCurrentCode(tfCode);
+    setTimeframeLabel(tfName);
+    setTimeframeMinutes(tfMinutes);
+    fetchCandles(tfCode, false, true);
+  }, [fetchCandles]);
+
+  // Handle Timeframe Switch (Initial load for selected timeframe)
   const handleSelectTimeframe = useCallback((code, label, minutes) => {
     setCurrentCode(code);
     setTimeframeLabel(label);
     setTimeframeMinutes(minutes);
-    fetchCandles(code);
+    fetchCandles(code, false, true);
   }, [fetchCandles]);
 
-  // Real-time Countdown Timer Loop
+  // Real-time Countdown Timer Loop (Direct DOM update at 60fps)
   useEffect(() => {
-    function tick() {
-      const formatted = calculateBarCountdown(timeframeMinutes);
-      setCountdownText(formatted);
+    function updateCountdown() {
+      const formatted = calculateBarCountdown(timeframeMinutesRef.current);
+      updateHeaderCountdown(formatted);
+
+      const scaleCountdownEl = document.querySelector('.tv-scale-countdown-text');
+      if (scaleCountdownEl) {
+        scaleCountdownEl.innerText = formatted;
+      }
     }
 
-    tick();
-    const interval = setInterval(tick, 1000);
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
   }, [timeframeMinutes]);
 
-  // Setup WebSocket Listener
+  // Setup WebSocket Listener / Live Polling Fallback (Only active when page is open)
   useEffect(() => {
-    const socket = io({
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-    });
-    socketRef.current = socket;
+    let socket = null;
+    let isVercel = false;
 
-    socket.on('connect', () => {
-      setWsStatus('live');
-      socket.emit('subscribe', 'price');
-      socket.emit('subscribe', currentCode);
-    });
+    if (typeof window !== 'undefined') {
+      isVercel = window.location.hostname.includes('vercel.app');
+    }
 
-    socket.on('disconnect', () => {
-      setWsStatus('disconnected');
-    });
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || (isVercel ? null : undefined);
 
-    socket.on('upstream_status', (status) => {
-      if (status.connected) setWsStatus('live');
-      else if (status.reconnecting) setWsStatus('reconnecting');
-      else setWsStatus('disconnected');
-    });
+    if (wsUrl !== null) {
+      try {
+        socket = io(wsUrl, {
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 3,
+          reconnectionDelay: 2000,
+          timeout: 5000,
+        });
+        socketRef.current = socket;
 
-    socket.on('token_refreshed', () => {
-      fetchTokenInfo();
-    });
+        socket.on('connect', () => {
+          setWsStatus('live');
+          socket.emit('subscribe', 'price');
+          socket.emit('subscribe', currentCodeRef.current);
+        });
 
-    // Full CSV Candle Stream
-    socket.on('data', (csvPayload) => {
-      if (typeof csvPayload !== 'string') return;
-      const parts = csvPayload.split(',');
-      if (parts.length < 13) return;
+        socket.on('disconnect', () => {
+          setWsStatus('disconnected');
+        });
 
-      if (chartRef.current) {
-        chartRef.current.updateLiveCsv(parts);
+        socket.on('connect_error', () => {
+          setWsStatus('cloud');
+        });
+
+        socket.on('upstream_status', (status) => {
+          if (status.connected) setWsStatus('live');
+          else if (status.reconnecting) setWsStatus('reconnecting');
+          else setWsStatus('cloud');
+        });
+
+        socket.on('token_refreshed', () => {
+          fetchTokenInfo();
+        });
+
+        // Full CSV Candle Stream (Zero React Re-render)
+        socket.on('data', (csvPayload) => {
+          if (typeof csvPayload !== 'string') return;
+          const parts = csvPayload.split(',');
+          if (parts.length < 13) return;
+
+          if (chartRef.current) {
+            chartRef.current.updateLiveCsv(parts);
+          }
+
+          const ksiText = parts[46]?.trim();
+          const kcxText = parts[41]?.trim();
+          if (ksiText) setKsiLabelText((prev) => (prev !== `${ksiText} (KSI)` ? `${ksiText} (KSI)` : prev));
+          if (kcxText) setKcxLabelText((prev) => (prev !== `${kcxText} (KCX)` ? `${kcxText} (KCX)` : prev));
+        });
+
+        // Sub-second Live Tick Price (Zero React Re-render)
+        socket.on('price', (symbol, priceStr) => {
+          const expectedSymbol = currentCodeRef.current.split('_')[0];
+          if (symbol !== expectedSymbol) return;
+
+          if (chartRef.current) {
+            chartRef.current.updateLiveTickPrice(priceStr);
+          }
+        });
+      } catch (e) {
+        setWsStatus('cloud');
       }
+    } else {
+      setWsStatus('cloud');
+    }
 
-      const ksiText = parts[46]?.trim();
-      const kcxText = parts[41]?.trim();
-      if (ksiText) setKsiLabelText(`${ksiText} (KSI)`);
-      if (kcxText) setKcxLabelText(`${kcxText} (KCX)`);
-    });
-
-    // Sub-second Live Tick Price
-    socket.on('price', (symbol, priceStr) => {
-      const expectedSymbol = currentCode.split('_')[0];
-      if (symbol !== expectedSymbol) return;
-
-      const price = parseFloat(priceStr);
-      if (isNaN(price)) return;
-
-      if (chartRef.current) {
-        chartRef.current.updateLiveTickPrice(price);
+    // High-performance Live Polling Fallback when WebSocket is not active (e.g. on Vercel)
+    const pollInterval = setInterval(() => {
+      if (!socket || !socket.connected) {
+        fetchCandles(currentCodeRef.current, true);
       }
-
-      setOhlc((prev) => {
-        let flash = null;
-        if (prev.close !== undefined) {
-          if (price > prev.close) flash = 'flash-up';
-          else if (price < prev.close) flash = 'flash-down';
-        }
-        return {
-          ...prev,
-          close: price,
-          high: prev.high !== undefined ? Math.max(prev.high, price) : price,
-          low: prev.low !== undefined ? Math.min(prev.low, price) : price,
-          flash: flash,
-        };
-      });
-
-      if (prevPriceRef.current !== null) {
-        setTimeout(() => {
-          setOhlc((prev) => ({ ...prev, flash: null }));
-        }, 400);
-      }
-      prevPriceRef.current = price;
-    });
+    }, 4000);
 
     return () => {
-      socket.disconnect();
+      clearInterval(pollInterval);
+      if (socket) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
     };
-  }, [currentCode, fetchTokenInfo]);
+  }, [fetchCandles, fetchTokenInfo]);
 
-  // Initial Load
+  // Initial Load On Page Access
   useEffect(() => {
     fetchTokenInfo();
-    fetchCandles('XAUUSD.ca_5');
+    fetchCandles(currentCode, false, true);
 
     const tokenInterval = setInterval(fetchTokenInfo, 10000);
     return () => clearInterval(tokenInterval);
-  }, [fetchTokenInfo, fetchCandles]);
+  }, [fetchTokenInfo, fetchCandles, currentCode]);
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Top Navigation Header */}
       <Header
         currentCode={currentCode}
+        activeSymbolObj={activeSymbolObj}
+        onOpenAssetSelector={() => setIsAssetSelectorOpen(true)}
         timeframeLabel={timeframeLabel}
         onSelectTimeframe={handleSelectTimeframe}
         wsStatus={wsStatus}
         tokenInfo={tokenInfo}
         onOpenTokenModal={() => setIsTokenModalOpen(true)}
-        ohlc={ohlc}
         isRefreshing={isRefreshing}
-        onRefresh={() => fetchCandles(currentCode)}
-        countdownText={countdownText}
+        onRefresh={() => fetchCandles(currentCode, false, false)}
       />
 
       {/* Notification Banner */}
@@ -260,10 +279,18 @@ export default function TerminalPage() {
       <ChartContainer
         ref={chartRef}
         currentCode={currentCode}
-        countdownText={countdownText}
-        onCrosshairOHLC={(data) => setOhlc((prev) => ({ ...prev, ...data }))}
+        activeSymbolObj={activeSymbolObj}
         ksiLabelText={ksiLabelText}
         kcxLabelText={kcxLabelText}
+      />
+
+      {/* Asset Selector Watchlist Modal */}
+      <AssetSelector
+        isOpen={isAssetSelectorOpen}
+        onClose={() => setIsAssetSelectorOpen(false)}
+        currentSymbolCode={activeSymbolObj.code}
+        currentTimeframeCode={currentCode}
+        onSelectAsset={handleSelectAsset}
       />
 
       {/* Token & Auto-Refresh Modal */}
@@ -273,7 +300,7 @@ export default function TerminalPage() {
         tokenInfo={tokenInfo}
         onRefreshTokenSuccess={() => {
           fetchTokenInfo();
-          fetchCandles(currentCode);
+          fetchCandles(currentCode, false, false);
         }}
       />
     </div>

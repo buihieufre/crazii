@@ -1,24 +1,19 @@
 'use client';
 
 import React from 'react';
-import { TIMEFRAMES } from '@/lib/chart-constants';
 import { formatTimeRemaining } from '@/lib/utils';
 
 export default function Header({
   currentCode,
-  timeframeLabel,
+  activeSymbolObj,
+  onOpenAssetSelector,
   onSelectTimeframe,
   wsStatus,
   tokenInfo,
   onOpenTokenModal,
-  ohlc,
   isRefreshing,
   onRefresh,
-  countdownText
 }) {
-  const isBullish = ohlc.twbClose > ohlc.twbOpen;
-  const isBearish = ohlc.twbClose < ohlc.twbOpen;
-
   const accessLeft = tokenInfo?.accessToken?.timeLeftSeconds || 0;
   const refreshLeft = tokenInfo?.refreshToken?.timeLeftSeconds || 0;
   const hasValidAccess = tokenInfo?.accessToken?.hasToken && !tokenInfo?.accessToken?.isExpired;
@@ -45,7 +40,10 @@ export default function Header({
 
   let wsBadgeClass = 'ws-status-badge';
   let wsText = 'WS Live';
-  if (wsStatus === 'reconnecting') {
+  if (wsStatus === 'cloud') {
+    wsBadgeClass = 'ws-status-badge';
+    wsText = 'Cloud Live';
+  } else if (wsStatus === 'reconnecting') {
     wsBadgeClass += ' reconnecting';
     wsText = 'WS Reconnecting...';
   } else if (wsStatus === 'disconnected') {
@@ -53,28 +51,47 @@ export default function Header({
     wsText = 'WS Disconnected';
   }
 
+  const availableTimeframes = activeSymbolObj?.timeframes || [
+    { code: `${activeSymbolObj?.code || 'XAUUSD.ca'}_5`, name: '5m', minutes: 5 },
+    { code: `${activeSymbolObj?.code || 'XAUUSD.ca'}_15`, name: '15m', minutes: 15 },
+    { code: `${activeSymbolObj?.code || 'XAUUSD.ca'}_1440`, name: '1D', minutes: 1440 }
+  ];
+
   return (
     <header>
       <div className="brand-section">
         <div className="brand-logo">CRAZII<span>.COM</span></div>
         
-        <div className="symbol-pill">
+        {/* Symbol Pill with Icon -> click to open Asset Selector */}
+        <div
+          className="symbol-pill"
+          onClick={onOpenAssetSelector}
+          style={{ cursor: 'pointer', userSelect: 'none' }}
+          title="Click để chọn danh sách tài sản"
+        >
+          {activeSymbolObj?.image && (
+            <img
+              src={activeSymbolObj.image.split(';')[0]}
+              alt={activeSymbolObj.name}
+              style={{ width: 16, height: 16, borderRadius: '50%', objectFit: 'cover' }}
+              onError={(e) => { e.target.style.display = 'none'; }}
+            />
+          )}
           <span className="live-dot"></span>
           <span>{currentCode}</span>
-          {countdownText && (
-            <span className="tv-header-countdown">({countdownText})</span>
-          )}
+          <span id="header-countdown-text" className="tv-header-countdown"></span>
+          <span style={{ fontSize: 9, opacity: 0.7, marginLeft: 2 }}>▼</span>
         </div>
 
-        {/* Timeframe Selector */}
+        {/* Timeframe Selector for Active Symbol */}
         <div className="tf-group">
-          {TIMEFRAMES.map((tf) => (
+          {availableTimeframes.map((tf) => (
             <button
               key={tf.code}
               className={`tf-btn ${currentCode === tf.code ? 'active' : ''}`}
-              onClick={() => onSelectTimeframe(tf.code, tf.label, tf.minutes)}
+              onClick={() => onSelectTimeframe(tf.code, tf.name, tf.minutes)}
             >
-              {tf.label}
+              {tf.name}
             </button>
           ))}
         </div>
@@ -92,58 +109,40 @@ export default function Header({
         </div>
       </div>
 
-      {/* Live Dynamic OHLC Values */}
+      {/* Direct DOM OHLC Bar (Zero React Re-render at 60fps) */}
       <div className="ohlc-bar">
         <div className="ohlc-item">
           <span className="ohlc-lbl">O:</span>
-          <span className="ohlc-val">{ohlc.open !== undefined ? Number(ohlc.open).toFixed(2) : '-'}</span>
+          <span id="ohlc-val-o" className="ohlc-val">-</span>
         </div>
         <div className="ohlc-item">
           <span className="ohlc-lbl">H:</span>
-          <span className="ohlc-val">{ohlc.high !== undefined ? Number(ohlc.high).toFixed(2) : '-'}</span>
+          <span id="ohlc-val-h" className="ohlc-val">-</span>
         </div>
         <div className="ohlc-item">
           <span className="ohlc-lbl">L:</span>
-          <span className="ohlc-val">{ohlc.low !== undefined ? Number(ohlc.low).toFixed(2) : '-'}</span>
+          <span id="ohlc-val-l" className="ohlc-val">-</span>
         </div>
         <div className="ohlc-item">
           <span className="ohlc-lbl">C:</span>
-          <span className={`ohlc-val ${ohlc.flash || ''}`}>
-            {ohlc.close !== undefined ? Number(ohlc.close).toFixed(2) : '-'}
-          </span>
+          <span id="ohlc-val-c" className="ohlc-val">-</span>
         </div>
         <div className="ohlc-item">
           <span className="ohlc-lbl">TWB O:</span>
-          <span className="ohlc-val">{ohlc.twbOpen !== undefined ? Number(ohlc.twbOpen).toFixed(2) : '-'}</span>
+          <span id="ohlc-val-twb-o" className="ohlc-val">-</span>
         </div>
         <div className="ohlc-item">
           <span className="ohlc-lbl">TWB C:</span>
-          <span className="ohlc-val">{ohlc.twbClose !== undefined ? Number(ohlc.twbClose).toFixed(2) : '-'}</span>
+          <span id="ohlc-val-twb-c" className="ohlc-val">-</span>
         </div>
-
-        {ohlc.twbOpen !== undefined && ohlc.twbClose !== undefined && (
-          <span
-            className={`twb-tag ${isBullish ? 'twb-bullish' : isBearish ? 'twb-bearish' : ''}`}
-          >
-            {isBullish ? '🟡 BULLISH' : isBearish ? '🔴 BEARISH' : '⚪ NEUTRAL'}
-          </span>
-        )}
+        <span id="ohlc-twb-tag" className="twb-tag" style={{ display: 'none' }}>-</span>
       </div>
 
       {/* Controls */}
       <div className="controls-section">
-        <select
-          className="select-symbol"
-          value={currentCode}
-          onChange={(e) => {
-            const found = TIMEFRAMES.find(t => t.code === e.target.value);
-            if (found) onSelectTimeframe(found.code, found.label, found.minutes);
-          }}
-        >
-          <option value="XAUUSD.ca_5">XAUUSD 5M (Default)</option>
-          <option value="XAUUSD.ca_15">XAUUSD 15M</option>
-          <option value="XAUUSD.ca_1440">XAUUSD 1D</option>
-        </select>
+        <button className="btn" onClick={onOpenAssetSelector} title="Mở danh sách tài sản">
+          <span>📊 Assets</span>
+        </button>
 
         <button className="btn" onClick={onRefresh} disabled={isRefreshing}>
           {isRefreshing ? <span className="spinner"></span> : <span>🔄</span>}
