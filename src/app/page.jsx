@@ -48,19 +48,33 @@ export default function TerminalPage() {
   }, []);
 
   // Fetch Historical Candles
-  const fetchCandles = useCallback(async (codeToFetch = currentCode) => {
-    setIsRefreshing(true);
-    setNotification(null);
+  const fetchCandles = useCallback(async (codeToFetch = currentCode, isSilent = false) => {
+    if (!isSilent) setIsRefreshing(true);
 
     try {
       const res = await fetch(`/api/candles?code=${encodeURIComponent(codeToFetch)}`);
+      const contentType = res.headers.get('content-type') || '';
+
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        if (!isSilent) {
+          setNotification({
+            type: 'error',
+            message: `API trả về phản hồi không hợp lệ (${res.status}). Vui lòng kiểm tra biến môi trường CRAZII_REFRESH_TOKEN trên Vercel / Server.`
+          });
+        }
+        return;
+      }
+
       const result = await res.json();
 
       if (!res.ok) {
-        setNotification({
-          type: 'error',
-          message: `API (${codeToFetch}): ${result.message || 'Authentication required.'}`
-        });
+        if (!isSilent) {
+          setNotification({
+            type: 'error',
+            message: `API (${codeToFetch}): ${result.message || 'Authentication required. Check CRAZII_REFRESH_TOKEN in Environment Variables.'}`
+          });
+        }
         return;
       }
 
@@ -71,12 +85,16 @@ export default function TerminalPage() {
       else if (result.success && Array.isArray(result.result)) list = result.result;
 
       if (list.length === 0) {
-        setNotification({
-          type: 'info',
-          message: `Received 0 candle records for ${codeToFetch}.`
-        });
+        if (!isSilent) {
+          setNotification({
+            type: 'info',
+            message: `Received 0 candle records for ${codeToFetch}.`
+          });
+        }
         return;
       }
+
+      setNotification(null);
 
       if (chartRef.current) {
         chartRef.current.renderDataset(list);
@@ -87,12 +105,14 @@ export default function TerminalPage() {
         socketRef.current.emit('subscribe', 'price');
       }
     } catch (err) {
-      setNotification({
-        type: 'error',
-        message: `Proxy unreachable: ${err.message}. Ensure 'node server.js' is running.`
-      });
+      if (!isSilent) {
+        setNotification({
+          type: 'error',
+          message: `Lỗi kết nối API: ${err.message}`
+        });
+      }
     } finally {
-      setIsRefreshing(false);
+      if (!isSilent) setIsRefreshing(false);
     }
   }, [currentCode]);
 
