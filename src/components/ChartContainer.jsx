@@ -11,7 +11,8 @@ const ChartContainer = forwardRef(function ChartContainer(
     currentCode,
     activeSymbolObj,
     ksiLabelText,
-    kcxLabelText
+    kcxLabelText,
+    onOpenAssetSelector
   },
   ref
 ) {
@@ -220,8 +221,8 @@ const ChartContainer = forwardRef(function ChartContainer(
 
       if (isNaN(open) || isNaN(close)) return;
 
-      const expectedSymbol = currentCodeRef.current.split('_')[0];
-      const expectedTf = currentCodeRef.current.split('_')[1];
+      const expectedSymbol = currentCodeRef.current?.split('_')[0];
+      const expectedTf = currentCodeRef.current?.split('_')[1];
 
       if (symbol === expectedSymbol && timeframe === expectedTf) {
         const time = parseTimestampToSeconds(timestampStr);
@@ -617,6 +618,41 @@ const ChartContainer = forwardRef(function ChartContainer(
       <div className="watermark-top-right">CRAZII<span>.COM</span></div>
       <div className="watermark-center">CRAZII</div>
       <div className="watermark-bottom-left">CRAZII<span>.COM</span></div>
+
+      {/* Standby / Idle State Overlay */}
+      {!currentCode && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(11, 14, 20, 0.88)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 20,
+            gap: 14,
+            textAlign: 'center',
+            padding: 24,
+          }}
+        >
+          <div style={{ fontSize: 42 }}>📊</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#FFB300', letterSpacing: 0.5 }}>
+            CHỌN TÀI SẢN ĐỂ BẮT ĐẦU STREAMING
+          </div>
+          <p style={{ maxWidth: 500, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            Biểu đồ đang ở trạng thái <strong>Standby (Đứng yên)</strong> để tránh xung đột kết nối với phiên giao dịch Crazii trên trình duyệt chính. Chọn tài sản bên dưới để bắt đầu kết nối.
+          </p>
+          <button
+            className="btn btn-primary"
+            style={{ padding: '8px 18px', fontSize: 12.5, fontWeight: 700, borderRadius: 6, marginTop: 4 }}
+            onClick={onOpenAssetSelector}
+          >
+            📊 Mở danh sách tài sản (Watchlist)
+          </button>
+        </div>
+      )}
 
       {/* Exact TradingView Stacked Price & Countdown Scale Badge (Zero Re-render Direct DOM) */}
       <div

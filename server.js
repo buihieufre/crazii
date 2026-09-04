@@ -397,19 +397,24 @@ nextApp.prepare().then(() => {
     }
   });
 
-  // Upstream WebSocket Connection
+  // Upstream WebSocket Connection (STRICTLY ON-DEMAND: Only connects when client selects an asset)
   let targetSocket = null;
-  let activeChannels = new Set(['price', 'XAUUSD.ca_5', 'XAUUSD.ca_15']);
+  let activeChannels = new Set();
   let isUpstreamConnected = false;
   let upstreamReconnectTimer = null;
 
   function connectUpstreamWebSocket() {
+    if (activeChannels.size === 0) {
+      console.log(`[WS Relay] ⏸️ No active channels subscribed. Upstream WebSocket remains IDLE.`);
+      return;
+    }
+
     const wsToken = getActiveAuthToken(null);
     const cleanToken = wsToken.startsWith('Bearer ') ? wsToken.replace('Bearer ', '') : wsToken;
     const deviceId = getActiveDeviceId();
 
     const wsHost = 'https://tick-ws.crazii.com';
-    console.log(`[WS Relay] Connecting to upstream WebSocket: ${wsHost}... (Token: ${cleanToken.slice(0, 15)}...)`);
+    console.log(`[WS Relay] ⚡ Connecting on-demand to upstream WebSocket: ${wsHost}... (Channels: [${Array.from(activeChannels).join(', ')}])`);
 
     if (targetSocket) {
       try {
@@ -441,7 +446,7 @@ nextApp.prepare().then(() => {
 
     targetSocket.on('connect', () => {
       isUpstreamConnected = true;
-      console.log(`[WS Relay] ✅ Connected to upstream Crazii WebSocket! Subscribing to channels: [${Array.from(activeChannels).join(', ')}]`);
+      console.log(`[WS Relay] ✅ Connected to upstream Crazii WebSocket! Subscribing to: [${Array.from(activeChannels).join(', ')}]`);
       activeChannels.forEach(channel => {
         targetSocket.emit('subscribe', channel);
       });
@@ -470,7 +475,9 @@ nextApp.prepare().then(() => {
       targetSocket.io.on('reconnect_failed', () => {
         console.error(`[WS Relay] ❌ Reconnection failed completely. Retrying in 3s...`);
         clearTimeout(upstreamReconnectTimer);
-        upstreamReconnectTimer = setTimeout(connectUpstreamWebSocket, 3000);
+        if (activeChannels.size > 0) {
+          upstreamReconnectTimer = setTimeout(connectUpstreamWebSocket, 3000);
+        }
       });
     }
 
@@ -492,30 +499,71 @@ nextApp.prepare().then(() => {
       isUpstreamConnected = false;
       console.warn(`[WS Relay] Disconnected from upstream:`, reason);
       io.emit('upstream_status', { connected: false, reason: reason });
-      if (reason === 'io server disconnect') {
+      if (reason === 'io server disconnect' && activeChannels.size > 0) {
         targetSocket.connect();
       }
     });
   }
 
-  // Watchdog
+  function disconnectUpstreamWebSocket() {
+    clearTimeout(upstreamReconnectTimer);
+    if (targetSocket) {
+      console.log(`[WS Relay] 🛑 Disconnecting upstream WebSocket (Idle / No active asset)`);
+      try {
+        targetSocket.removeAllListeners();
+        targetSocket.disconnect();
+        targetSocket.close();
+      } catch (e) { }
+      targetSocket = null;
+    }
+    isUpstreamConnected = false;
+    activeChannels.clear();
+  }
+
+  // Watchdog: Only keeps connection alive if there are active channels requested
   setInterval(() => {
-    if (!targetSocket || (!targetSocket.connected && !isUpstreamConnected)) {
-      if (targetSocket && typeof targetSocket.connect === 'function') {
-        targetSocket.connect();
+    if (activeChannels.size > 0) {
+      if (!targetSocket || (!targetSocket.connected && !isUpstreamConnected)) {
+        if (targetSocket && typeof targetSocket.connect === 'function') {
+          targetSocket.connect();
+        } else {
+          connectUpstreamWebSocket();
+        }
       }
     }
   }, 15000);
 
-  // Local Frontend Socket.IO Connections
+  // Local Frontend Socket.IO Connections (On-Demand)
   io.on('connection', (clientSocket) => {
     clientSocket.on('subscribe', (channel) => {
       if (channel && typeof channel === 'string') {
         activeChannels.add(channel);
-        if (targetSocket && targetSocket.connected) {
+        if (!targetSocket || !targetSocket.connected) {
+          connectUpstreamWebSocket();
+        } else {
           targetSocket.emit('subscribe', channel);
         }
       }
+    });
+
+    clientSocket.on('unsubscribe', (channel) => {
+      if (channel && typeof channel === 'string') {
+        activeChannels.delete(channel);
+        if (targetSocket && targetSocket.connected) {
+          targetSocket.emit('unsubscribe', channel);
+        }
+        if (activeChannels.size === 0) {
+          disconnectUpstreamWebSocket();
+        }
+      }
+    });
+
+    clientSocket.on('disconnect', () => {
+      setTimeout(() => {
+        if (io.sockets.sockets.size === 0) {
+          disconnectUpstreamWebSocket();
+        }
+      }, 5000);
     });
   });
 
@@ -524,16 +572,14 @@ nextApp.prepare().then(() => {
     return handle(req, res);
   });
 
-  // Start Upstream WS & Auto-Renew Token on Startup
+  // Startup Token Verification (Does NOT connect upstream WS until user clicks an asset)
   (async () => {
     const auth = getActiveAuthToken();
     const jwt = decodeJwt(auth);
     const nowSec = Math.floor(Date.now() / 1000);
     if (!jwt || !jwt.exp || jwt.exp <= nowSec + 60) {
-      console.log(`[Startup] Access token is missing or expiring soon. Auto-renewing from Refresh Token...`);
+      console.log(`[Startup] Access token is missing or expiring soon. Verifying Refresh Token...`);
       await executeRefreshToken();
-    } else {
-      connectUpstreamWebSocket();
     }
   })();
 

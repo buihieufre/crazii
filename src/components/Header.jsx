@@ -40,7 +40,10 @@ export default function Header({
 
   let wsBadgeClass = 'ws-status-badge';
   let wsText = 'WS Live';
-  if (wsStatus === 'cloud') {
+  if (wsStatus === 'idle') {
+    wsBadgeClass += ' idle';
+    wsText = 'WS Idle (Chờ chọn)';
+  } else if (wsStatus === 'cloud') {
     wsBadgeClass = 'ws-status-badge';
     wsText = 'Cloud Live';
   } else if (wsStatus === 'reconnecting') {
@@ -51,11 +54,7 @@ export default function Header({
     wsText = 'WS Disconnected';
   }
 
-  const availableTimeframes = activeSymbolObj?.timeframes || [
-    { code: `${activeSymbolObj?.code || 'XAUUSD.ca'}_5`, name: '5m', minutes: 5 },
-    { code: `${activeSymbolObj?.code || 'XAUUSD.ca'}_15`, name: '15m', minutes: 15 },
-    { code: `${activeSymbolObj?.code || 'XAUUSD.ca'}_1440`, name: '1D', minutes: 1440 }
-  ];
+  const availableTimeframes = activeSymbolObj?.timeframes || [];
 
   return (
     <header>
@@ -77,24 +76,26 @@ export default function Header({
               onError={(e) => { e.target.style.display = 'none'; }}
             />
           )}
-          <span className="live-dot"></span>
-          <span>{currentCode}</span>
+          <span className="live-dot" style={{ backgroundColor: currentCode ? 'var(--accent-green)' : '#ffa726' }}></span>
+          <span>{currentCode || 'Chọn tài sản'}</span>
           <span id="header-countdown-text" className="tv-header-countdown"></span>
           <span style={{ fontSize: 9, opacity: 0.7, marginLeft: 2 }}>▼</span>
         </div>
 
         {/* Timeframe Selector for Active Symbol */}
-        <div className="tf-group">
-          {availableTimeframes.map((tf) => (
-            <button
-              key={tf.code}
-              className={`tf-btn ${currentCode === tf.code ? 'active' : ''}`}
-              onClick={() => onSelectTimeframe(tf.code, tf.name, tf.minutes)}
-            >
-              {tf.name}
-            </button>
-          ))}
-        </div>
+        {availableTimeframes.length > 0 && (
+          <div className="tf-group">
+            {availableTimeframes.map((tf) => (
+              <button
+                key={tf.code}
+                className={`tf-btn ${currentCode === tf.code ? 'active' : ''}`}
+                onClick={() => onSelectTimeframe(tf.code, tf.name, tf.minutes)}
+              >
+                {tf.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Live WebSocket Status */}
         <div className={wsBadgeClass}>

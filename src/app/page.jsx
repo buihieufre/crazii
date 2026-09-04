@@ -8,20 +8,21 @@ import TokenModal from '@/components/TokenModal';
 import AssetSelector from '@/components/AssetSelector';
 import { calculateBarCountdown } from '@/lib/utils';
 import { updateHeaderCountdown } from '@/lib/ohlc-updater';
-import { ALL_SYMBOLS, getSymbolByCode } from '@/lib/assets-data';
+import { getSymbolByCode } from '@/lib/assets-data';
 
 export default function TerminalPage() {
   const chartRef = useRef(null);
   const socketRef = useRef(null);
 
-  const [activeSymbolObj, setActiveSymbolObj] = useState(ALL_SYMBOLS[0]); // Default XAUUSD.ca
-  const [currentCode, setCurrentCode] = useState('XAUUSD.ca_5');
+  // Standby initial state: No asset selected by default to avoid Crazii session conflict
+  const [activeSymbolObj, setActiveSymbolObj] = useState(null);
+  const [currentCode, setCurrentCode] = useState(null);
   const [timeframeLabel, setTimeframeLabel] = useState('5m');
   const [timeframeMinutes, setTimeframeMinutes] = useState(5);
-  const [wsStatus, setWsStatus] = useState('live'); // 'live' | 'cloud' | 'reconnecting' | 'disconnected'
+  const [wsStatus, setWsStatus] = useState('idle'); // 'idle' | 'live' | 'cloud' | 'reconnecting' | 'disconnected'
   const [tokenInfo, setTokenInfo] = useState(null);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
-  const [isAssetSelectorOpen, setIsAssetSelectorOpen] = useState(false);
+  const [isAssetSelectorOpen, setIsAssetSelectorOpen] = useState(true); // Open watchlist on arrival
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notification, setNotification] = useState(null);
   const [ksiLabelText, setKsiLabelText] = useState('BOYS BUYING (KSI)');
@@ -45,8 +46,9 @@ export default function TerminalPage() {
     }
   }, []);
 
-  // Fetch Historical Candles On-Demand
+  // Fetch Historical Candles Strictly On-Demand (Only when an asset is selected)
   const fetchCandles = useCallback(async (codeToFetch = currentCode, isSilent = false, isInitial = false) => {
+    if (!codeToFetch) return;
     if (!isSilent) setIsRefreshing(true);
 
     try {
@@ -113,7 +115,7 @@ export default function TerminalPage() {
     }
   }, [currentCode]);
 
-  // Handle Asset Switch from Watchlist (Initial load for selected asset)
+  // Handle Asset Switch from Watchlist (Activates Streaming strictly on click)
   const handleSelectAsset = useCallback((symbolCode, tfCode, tfName, tfMinutes) => {
     const symObj = getSymbolByCode(symbolCode);
     setActiveSymbolObj(symObj);
@@ -123,7 +125,7 @@ export default function TerminalPage() {
     fetchCandles(tfCode, false, true);
   }, [fetchCandles]);
 
-  // Handle Timeframe Switch (Initial load for selected timeframe)
+  // Handle Timeframe Switch (Activates Streaming for chosen timeframe)
   const handleSelectTimeframe = useCallback((code, label, minutes) => {
     setCurrentCode(code);
     setTimeframeLabel(label);
@@ -133,6 +135,8 @@ export default function TerminalPage() {
 
   // Real-time Countdown Timer Loop (Direct DOM update at 60fps)
   useEffect(() => {
+    if (!currentCode) return;
+
     function updateCountdown() {
       const formatted = calculateBarCountdown(timeframeMinutesRef.current);
       updateHeaderCountdown(formatted);
@@ -146,10 +150,19 @@ export default function TerminalPage() {
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [timeframeMinutes]);
+  }, [currentCode, timeframeMinutes]);
 
-  // Setup WebSocket Listener / Live Polling Fallback (Only active when page is open)
+  // Setup WebSocket Listener / Live Polling Fallback (STRICTLY ON-DEMAND when an asset is clicked)
   useEffect(() => {
+    if (!currentCode) {
+      setWsStatus('idle');
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      return;
+    }
+
     let socket = null;
     let isVercel = false;
 
@@ -212,7 +225,7 @@ export default function TerminalPage() {
 
         // Sub-second Live Tick Price (Zero React Re-render)
         socket.on('price', (symbol, priceStr) => {
-          const expectedSymbol = currentCodeRef.current.split('_')[0];
+          const expectedSymbol = currentCodeRef.current?.split('_')[0];
           if (symbol !== expectedSymbol) return;
 
           if (chartRef.current) {
@@ -228,7 +241,7 @@ export default function TerminalPage() {
 
     // High-performance Live Polling Fallback when WebSocket is not active (e.g. on Vercel)
     const pollInterval = setInterval(() => {
-      if (!socket || !socket.connected) {
+      if (currentCodeRef.current && (!socket || !socket.connected)) {
         fetchCandles(currentCodeRef.current, true);
       }
     }, 4000);
@@ -236,20 +249,23 @@ export default function TerminalPage() {
     return () => {
       clearInterval(pollInterval);
       if (socket) {
+        if (currentCodeRef.current) {
+          socket.emit('unsubscribe', currentCodeRef.current);
+          socket.emit('unsubscribe', 'price');
+        }
         socket.removeAllListeners();
         socket.disconnect();
       }
     };
-  }, [fetchCandles, fetchTokenInfo]);
+  }, [currentCode, fetchCandles, fetchTokenInfo]);
 
-  // Initial Load On Page Access
+  // Initial Load On Page Access (Only verifies Token, DOES NOT call candle API until an asset is clicked)
   useEffect(() => {
     fetchTokenInfo();
-    fetchCandles(currentCode, false, true);
 
-    const tokenInterval = setInterval(fetchTokenInfo, 10000);
+    const tokenInterval = setInterval(fetchTokenInfo, 15000);
     return () => clearInterval(tokenInterval);
-  }, [fetchTokenInfo, fetchCandles, currentCode]);
+  }, [fetchTokenInfo]);
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -264,7 +280,10 @@ export default function TerminalPage() {
         tokenInfo={tokenInfo}
         onOpenTokenModal={() => setIsTokenModalOpen(true)}
         isRefreshing={isRefreshing}
-        onRefresh={() => fetchCandles(currentCode, false, false)}
+        onRefresh={() => {
+          if (currentCode) fetchCandles(currentCode, false, false);
+          else setIsAssetSelectorOpen(true);
+        }}
       />
 
       {/* Notification Banner */}
@@ -282,13 +301,17 @@ export default function TerminalPage() {
         activeSymbolObj={activeSymbolObj}
         ksiLabelText={ksiLabelText}
         kcxLabelText={kcxLabelText}
+        onOpenAssetSelector={() => setIsAssetSelectorOpen(true)}
       />
 
       {/* Asset Selector Watchlist Modal */}
       <AssetSelector
         isOpen={isAssetSelectorOpen}
-        onClose={() => setIsAssetSelectorOpen(false)}
-        currentSymbolCode={activeSymbolObj.code}
+        onClose={() => {
+          // Allow closing if an asset is already selected
+          if (currentCode) setIsAssetSelectorOpen(false);
+        }}
+        currentSymbolCode={activeSymbolObj?.code}
         currentTimeframeCode={currentCode}
         onSelectAsset={handleSelectAsset}
       />
@@ -300,7 +323,7 @@ export default function TerminalPage() {
         tokenInfo={tokenInfo}
         onRefreshTokenSuccess={() => {
           fetchTokenInfo();
-          fetchCandles(currentCode, false, false);
+          if (currentCode) fetchCandles(currentCode, false, false);
         }}
       />
     </div>
