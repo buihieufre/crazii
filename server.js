@@ -261,10 +261,6 @@ nextApp.prepare().then(() => {
 
         io.emit('token_refreshed', {
           success: true,
-          token: newAccessToken,
-          accessToken: newAccessToken,
-          accessPayload: decodedAccess,
-          refreshPayload: decodedRefresh,
           timestamp: Date.now()
         });
 
@@ -298,7 +294,7 @@ nextApp.prepare().then(() => {
     }
   }, 30000);
 
-  // REST API: /api/token-info (Pure query without triggering redundant refreshes)
+  // REST API: /api/token-info (Safe metadata query without exposing raw tokens)
   app.get('/api/token-info', (req, res) => {
     const auth = getActiveAuthToken(req);
     const refresh = getActiveRefreshToken();
@@ -313,31 +309,31 @@ nextApp.prepare().then(() => {
     return res.json({
       accessToken: {
         hasToken: Boolean(auth && !auth.includes('PLACEHOLDER')),
-        preview: auth ? `${auth.slice(0, 15)}...${auth.slice(-10)}` : null,
         expiresAt: authExp > 0 ? new Date(authExp * 1000).toISOString() : null,
         timeLeftSeconds: Math.max(0, authExp - nowSec),
-        isExpired: authExp > 0 ? nowSec >= authExp : true,
-        payload: authJwt
+        isExpired: authExp > 0 ? nowSec >= authExp : true
       },
       refreshToken: {
         hasToken: Boolean(refresh && !refresh.includes('PLACEHOLDER')),
-        preview: refresh ? `${refresh.slice(0, 15)}...${refresh.slice(-10)}` : null,
         expiresAt: refreshExp > 0 ? new Date(refreshExp * 1000).toISOString() : null,
         timeLeftSeconds: Math.max(0, refreshExp - nowSec),
-        isExpired: refreshExp > 0 ? nowSec >= refreshExp : true,
-        payload: refreshJwt
+        isExpired: refreshExp > 0 ? nowSec >= refreshExp : true
       }
     });
   });
 
-  // REST API: /api/refresh-token
+  // REST API: /api/refresh-token (Zero-leakage manual refresh trigger)
   app.post('/api/refresh-token', async (req, res) => {
     const customRefreshToken = req.body && req.body.refreshToken ? req.body.refreshToken : (req.body && req.body.token ? req.body.token : null);
-    const result = await executeRefreshToken(customRefreshToken);
+    const result = await executeRefreshToken(customRefreshToken, true);
     if (result.success) {
-      return res.json(result);
+      return res.json({
+        success: true,
+        message: 'Access Token refreshed successfully on server',
+        expiresIn: 900
+      });
     } else {
-      return res.status(result.status || 500).json(result);
+      return res.status(result.status || 500).json({ success: false, message: result.message || 'Refresh token rejected' });
     }
   });
 
@@ -351,11 +347,10 @@ nextApp.prepare().then(() => {
     const cleanRefresh = refreshToken.replace(/^Bearer\s+/i, '').trim();
     updateEnvTokens({ refreshToken: cleanRefresh });
 
-    const refreshResult = await executeRefreshToken(cleanRefresh);
+    const refreshResult = await executeRefreshToken(cleanRefresh, true);
     return res.json({
       success: refreshResult.success,
-      message: refreshResult.success ? 'Refresh Token saved & Access Token renewed!' : refreshResult.message,
-      result: refreshResult
+      message: refreshResult.success ? 'Refresh Token saved & Access Token renewed!' : (refreshResult.message || 'Error updating token')
     });
   });
 

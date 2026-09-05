@@ -620,10 +620,14 @@ ${statusLines.join('\n')}`;
   }
 
   getStatusPayload() {
+    const safeConfig = { ...this.config };
+    delete safeConfig.botToken;
+    
     return {
       config: {
-        ...this.config,
-        botTokenPreview: this.config.botToken ? `${this.config.botToken.slice(0, 8)}...${this.config.botToken.slice(-6)}` : ''
+        ...safeConfig,
+        hasBotToken: Boolean(this.config.botToken),
+        botTokenPreview: this.config.botToken ? `${this.config.botToken.slice(0, 6)}...${this.config.botToken.slice(-4)}` : ''
       },
       activeTrades: Array.from(this.activeTrades.values()),
       tradeHistory: this.tradeHistory.slice(0, 50),

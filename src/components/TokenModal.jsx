@@ -115,7 +115,7 @@ export default function TokenModal({
             className="input-field"
             value={refreshTokenInput}
             onChange={(e) => setRefreshTokenInput(e.target.value)}
-            placeholder={tokenInfo?.refreshToken?.preview ? `Current: ${tokenInfo.refreshToken.preview}` : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IlJlZnJlc2giLC...'}
+            placeholder="Dán mã Refresh Token mới tại đây (eyJhbGci...)"
           />
         </div>
 
