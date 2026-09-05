@@ -30,13 +30,13 @@ export function getAuthToken() {
 
 let inFlightRefreshPromise = null;
 
-export async function executeRefreshToken() {
+export async function executeRefreshToken(force = false) {
   const currentAuth = getAuthToken();
   const jwt = decodeJwt(currentAuth);
   const nowSec = Math.floor(Date.now() / 1000);
 
-  // If token is still valid with > 3 mins left, reuse it without making external request
-  if (jwt && jwt.exp && (jwt.exp - nowSec > 180)) {
+  // If token is still valid with > 3 mins left and not forcing, reuse it without making external request
+  if (!force && jwt && jwt.exp && (jwt.exp - nowSec > 180)) {
     return {
       success: true,
       token: currentAuth,

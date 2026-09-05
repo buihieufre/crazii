@@ -356,7 +356,8 @@ export default function Header({
           )}
         </div>
 
-        {/* Telegram Signal Bot Dashboard Button */}
+        {/* Telegram Signal Bot Dashboard Button (Temporarily Hidden) */}
+        {/*
         <Link
           href="/bot-config"
           className="btn"
@@ -374,6 +375,7 @@ export default function Header({
           <span>🤖</span>
           <span>Bot Signals</span>
         </Link>
+        */}
 
         {/* Fullscreen Toggle Button */}
         <button

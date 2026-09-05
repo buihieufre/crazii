@@ -36,7 +36,7 @@ export async function GET(request) {
 
     // 401 Recovery: Refresh token and retry once
     if (response.status === 401) {
-      const refreshResult = await executeRefreshToken();
+      const refreshResult = await executeRefreshToken(true);
       if (refreshResult.success) {
         authToken = refreshResult.accessToken || refreshResult.token;
         headers['Authorization'] = `Bearer ${authToken}`;

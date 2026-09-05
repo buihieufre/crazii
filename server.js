@@ -173,9 +173,9 @@ nextApp.prepare().then(() => {
   /**
    * Core Function: Execute Refresh Token with Crazii API using the 3-day Refresh Token
    */
-  async function executeRefreshToken(customRefreshToken = null) {
-    // If no custom token is passed, check if the current token is still valid (> 2 minutes left)
-    if (!customRefreshToken) {
+  async function executeRefreshToken(customRefreshToken = null, force = false) {
+    // If no custom token is passed and force is false, check if the current token is still valid (> 2 minutes left)
+    if (!customRefreshToken && !force) {
       const currentAuth = getActiveAuthToken();
       const jwt = decodeJwt(currentAuth);
       const nowSec = Math.floor(Date.now() / 1000);
@@ -254,8 +254,8 @@ nextApp.prepare().then(() => {
           refreshToken: newRefreshToken || (customRefreshToken ? refreshToken : null)
         });
 
-        // Only reconnect WebSocket if not connected
-        if (!targetSocket || !targetSocket.connected) {
+        // Reconnect upstream WebSocket if active channels are registered
+        if (activeChannels.size > 0) {
           connectUpstreamWebSocket();
         }
 
@@ -596,11 +596,16 @@ nextApp.prepare().then(() => {
         console.warn(`[WS Relay] ⚠️ Reconnection error:`, err.message);
       });
 
-      targetSocket.io.on('reconnect_failed', () => {
-        console.error(`[WS Relay] ❌ Reconnection failed completely. Retrying in 3s...`);
+      targetSocket.io.on('reconnect_failed', async () => {
+        console.error(`[WS Relay] ❌ Reconnection failed completely. Forcing token refresh & retrying in 3s...`);
         clearTimeout(upstreamReconnectTimer);
         if (activeChannels.size > 0) {
-          upstreamReconnectTimer = setTimeout(connectUpstreamWebSocket, 3000);
+          upstreamReconnectTimer = setTimeout(async () => {
+            if (activeChannels.size > 0) {
+              await executeRefreshToken(null, true);
+              connectUpstreamWebSocket();
+            }
+          }, 3000);
         }
       });
     }
@@ -627,14 +632,42 @@ nextApp.prepare().then(() => {
       isUpstreamConnected = false;
       console.error(`[WS Relay] Connection error:`, err.message);
       io.emit('upstream_status', { connected: false, error: err.message });
+
+      const isAuthErr = err.message && (
+        err.message.includes('401') || 
+        err.message.includes('403') || 
+        err.message.toLowerCase().includes('unauthorized') || 
+        err.message.toLowerCase().includes('forbidden') ||
+        err.message.toLowerCase().includes('websocket error')
+      );
+
+      if (isAuthErr && activeChannels.size > 0) {
+        clearTimeout(upstreamReconnectTimer);
+        upstreamReconnectTimer = setTimeout(async () => {
+          if (activeChannels.size > 0) {
+            console.log(`[WS Relay] 🔑 Auth/Handshake error detected. Refreshing token and reconnecting...`);
+            await executeRefreshToken(null, true);
+            connectUpstreamWebSocket();
+          }
+        }, 2000);
+      }
     });
 
     targetSocket.on('disconnect', (reason) => {
       isUpstreamConnected = false;
       console.warn(`[WS Relay] Disconnected from upstream:`, reason);
       io.emit('upstream_status', { connected: false, reason: reason });
-      if (reason === 'io server disconnect' && activeChannels.size > 0) {
-        targetSocket.connect();
+
+      // When Crazii server closes the socket (e.g. 15-min token expiration), force token refresh & reconnect
+      if (activeChannels.size > 0) {
+        clearTimeout(upstreamReconnectTimer);
+        upstreamReconnectTimer = setTimeout(async () => {
+          if (activeChannels.size > 0) {
+            console.log(`[WS Relay] 🔄 Re-authenticating & reconnecting upstream WebSocket (Reason: ${reason})...`);
+            await executeRefreshToken(null, true);
+            connectUpstreamWebSocket();
+          }
+        }, 1500);
       }
     });
   }
@@ -672,20 +705,28 @@ nextApp.prepare().then(() => {
   syncBotChannels();
 
   // Watchdog: Only keeps connection alive if there are active channels requested
-  setInterval(() => {
+  setInterval(async () => {
     if (activeChannels.size > 0) {
-      if (!targetSocket || (!targetSocket.connected && !isUpstreamConnected)) {
-        if (targetSocket && typeof targetSocket.connect === 'function') {
-          targetSocket.connect();
-        } else {
-          connectUpstreamWebSocket();
+      if (!targetSocket || !targetSocket.connected || !isUpstreamConnected) {
+        console.log(`[WS Watchdog] 🩺 Upstream socket disconnected with active channels [${Array.from(activeChannels).join(', ')}]. Checking token & reconnecting...`);
+        const auth = getActiveAuthToken();
+        const jwt = decodeJwt(auth);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (!jwt || !jwt.exp || (jwt.exp - nowSec <= 120)) {
+          await executeRefreshToken(null, true);
         }
+        connectUpstreamWebSocket();
       }
     }
   }, 15000);
 
   // Local Frontend Socket.IO Connections (On-Demand)
   io.on('connection', (clientSocket) => {
+    clientSocket.emit('upstream_status', {
+      connected: isUpstreamConnected,
+      timestamp: Date.now()
+    });
+
     clientSocket.on('subscribe', (channel) => {
       if (channel && typeof channel === 'string') {
         activeChannels.add(channel);
