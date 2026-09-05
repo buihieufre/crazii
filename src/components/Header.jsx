@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { formatTimeRemaining } from '@/lib/utils';
 
 function getLayoutIcon(layout) {
@@ -354,6 +355,25 @@ export default function Header({
             </div>
           )}
         </div>
+
+        {/* Telegram Signal Bot Dashboard Button */}
+        <Link
+          href="/bot-config"
+          className="btn"
+          style={{
+            textDecoration: 'none',
+            background: 'rgba(0, 229, 255, 0.1)',
+            borderColor: 'rgba(0, 229, 255, 0.35)',
+            color: '#00E5FF',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5
+          }}
+          title="Cấu hình Live Telegram Signal Bot"
+        >
+          <span>🤖</span>
+          <span>Bot Signals</span>
+        </Link>
 
         {/* Fullscreen Toggle Button */}
         <button

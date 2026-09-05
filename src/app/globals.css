@@ -23,9 +23,9 @@ html, body {
   background-color: var(--bg-primary);
   color: var(--text-main);
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  height: 100vh;
+  min-height: 100vh;
   width: 100vw;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 /* Header Bar */
@@ -335,7 +335,8 @@ header {
   flex: 1;
   position: relative;
   width: 100%;
-  height: calc(100vh - 44px);
+  height: 100%;
+  min-height: 0;
   background: var(--bg-primary);
   overflow: hidden;
 }
@@ -787,7 +788,8 @@ header {
   flex: 1;
   display: grid;
   width: 100%;
-  height: calc(100vh - 44px);
+  height: 100%;
+  min-height: 0;
   background-color: #07090e;
   overflow: hidden;
   gap: 3px;
@@ -1219,7 +1221,8 @@ header {
 .terminal-main-content {
   display: flex;
   flex: 1;
-  height: calc(100vh - 44px);
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   position: relative;
 }
@@ -1681,6 +1684,115 @@ header {
 .style-opt:hover, .style-opt.selected {
   border-color: #2962FF;
   background: rgba(41, 98, 255, 0.2);
+}
+
+/* ==========================================================================
+   Mobile Optimization (iPhone 12/13/14, iPad, Android)
+   Ensures KSI and KCX bottom sub-panes are fully visible and responsive
+   ========================================================================== */
+@media (max-width: 768px) {
+  header {
+    padding: 3px 6px;
+    min-height: 36px;
+    gap: 4px;
+  }
+
+  .brand-section {
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .brand-logo {
+    font-size: 13px;
+  }
+
+  .symbol-pill {
+    padding: 2px 5px;
+    font-size: 10px;
+  }
+
+  .tf-group {
+    padding: 1px;
+    gap: 1px;
+  }
+
+  .tf-btn {
+    font-size: 9.5px;
+    padding: 2px 4.5px;
+  }
+
+  .ohlc-bar {
+    gap: 5px;
+    font-size: 9.5px;
+    overflow-x: auto;
+    max-width: 100%;
+    white-space: nowrap;
+    padding: 1px 0;
+  }
+
+  .ohlc-item {
+    gap: 2px;
+  }
+
+  .controls-section {
+    gap: 3px;
+  }
+
+  .btn {
+    padding: 2px 6px;
+    font-size: 10px;
+  }
+
+  .tv-left-drawing-panel {
+    width: 32px;
+    padding: 4px 0;
+  }
+
+  .tv-left-tool-btn {
+    width: 26px;
+    height: 26px;
+  }
+
+  .subpane-header-bar {
+    padding: 1px 5px;
+    gap: 4px;
+    left: 4px;
+  }
+
+  .subpane-title-tag {
+    font-size: 8px;
+  }
+
+  .pane-resize-actions {
+    gap: 2px;
+    padding-left: 3px;
+  }
+
+  .pane-height-badge {
+    font-size: 8px;
+    display: none;
+  }
+
+  .pane-btn {
+    font-size: 7.5px;
+    padding: 1px 3px;
+  }
+
+  .pane-presets {
+    display: none;
+  }
+
+  .tv-bottom-timezone-widget {
+    bottom: 2px;
+    right: 4px;
+    padding: 1px 4px;
+    font-size: 9px;
+  }
+
+  .watermark-center {
+    font-size: 36px;
+    letter-spacing: 4px;
+  }
 }
 
 

@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "botToken": "",
+  "chatId": "",
+  "maxConcurrentTrades": 10,
+  "defaultSlOffset": 20,
+  "monitoredSymbols": [
+    "BTCUSD_5"
+  ],
+  "enableNotifications": true,
+  "allowEarlyCut": true,
+  "autoMoveSlToBreakEven": true
+}

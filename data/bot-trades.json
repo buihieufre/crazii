@@ -1,0 +1,23 @@
+{
+  "activeTrades": [],
+  "tradeHistory": [
+    {
+      "id": "DEMO_XAUUSD.CA_5_M5_8641",
+      "symbol": "XAUUSD.ca_5",
+      "cleanSymbol": "XAUUSD.CA_5",
+      "timeframe": "5",
+      "dir": 1,
+      "entry": 2918.5,
+      "sl": 2898.5,
+      "tp1": 2948.5,
+      "tp2": 2978.5,
+      "msg_id": 52,
+      "status": -1,
+      "openedAt": 1788604008641,
+      "updatedAt": 1788604030908,
+      "closedAt": 1788604031787,
+      "decimals": 2
+    }
+  ],
+  "lastUpdated": 1788604031787
+}

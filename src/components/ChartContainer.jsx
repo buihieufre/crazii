@@ -848,9 +848,14 @@ const ChartContainer = forwardRef(function ChartContainer(
     if (el1 && el2) {
       const rect1 = el1.getBoundingClientRect();
       const rect2 = el2.getBoundingClientRect();
+      const containerH = containerRect.height || 600;
+
+      const ksiTop = Math.max(0, Math.min(containerH - 50, rect1.top - containerRect.top));
+      const kcxTop = Math.max(0, Math.min(containerH - 24, rect2.top - containerRect.top));
+
       setPanePositions({
-        ksiTop: Math.max(0, rect1.top - containerRect.top),
-        kcxTop: Math.max(0, rect2.top - containerRect.top),
+        ksiTop,
+        kcxTop,
       });
     }
   }
@@ -1608,12 +1613,17 @@ const ChartContainer = forwardRef(function ChartContainer(
     xSeries.attachPrimitive(kcxBlinkPrimitive);
     kcxBlinkPrimitiveRef.current = kcxBlinkPrimitive;
 
-    // Set Initial Stretch Factors: Main = 700, KSI = 180, KCX = 180
+    // Set Initial Stretch Factors with Mobile Optimization (Main, KSI, KCX)
+    const isMobileDevice = typeof window !== 'undefined' && (window.innerWidth <= 768 || window.innerHeight <= 720);
+    const initialMainStretch = isMobileDevice ? 400 : 700;
+    const initialKsiStretch = isMobileDevice ? 150 : 180;
+    const initialKcxStretch = isMobileDevice ? 150 : 180;
+
     const panes = chartInstance.panes();
     if (panes && panes.length >= 3) {
-      panes[0].setStretchFactor(700);
-      panes[1].setStretchFactor(180);
-      panes[2].setStretchFactor(180);
+      panes[0].setStretchFactor(initialMainStretch);
+      panes[1].setStretchFactor(initialKsiStretch);
+      panes[2].setStretchFactor(initialKcxStretch);
 
       panes[0].priceScale('right').applyOptions({
         autoScale: true,
@@ -1624,13 +1634,13 @@ const ChartContainer = forwardRef(function ChartContainer(
       panes[1].priceScale('right').applyOptions({
         autoScale: true,
         borderColor: '#1e222d',
-        scaleMargins: { top: 0.15, bottom: 0.05 },
+        scaleMargins: { top: 0.12, bottom: 0.05 },
       });
 
       panes[2].priceScale('right').applyOptions({
         autoScale: true,
         borderColor: '#1e222d',
-        scaleMargins: { top: 0.05, bottom: 0.15 },
+        scaleMargins: { top: 0.08, bottom: 0.08 },
       });
 
       applySolidPaneStyles(panes);
@@ -1711,10 +1721,14 @@ const ChartContainer = forwardRef(function ChartContainer(
 
     const handleResize = () => {
       if (chartInstance && containerRef.current) {
-        chartInstance.applyOptions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
+        const clientW = containerRef.current.clientWidth;
+        const clientH = containerRef.current.clientHeight;
+        if (clientW > 0 && clientH > 0) {
+          chartInstance.applyOptions({
+            width: clientW,
+            height: clientH,
+          });
+        }
         requestAnimationFrame(() => {
           updateBadgePositions();
           updateTvBadgePosition();
@@ -1735,10 +1749,13 @@ const ChartContainer = forwardRef(function ChartContainer(
       resizeObserver.observe(containerRef.current);
     }
 
+    // Settling timeouts for mobile browsers (safari/chrome bottom address bar adjustments)
+    setTimeout(handleResize, 50);
     setTimeout(() => {
+      handleResize();
       updatePaneHeaderPositions();
       applySolidPaneStyles(chartInstance.panes());
-    }, 100);
+    }, 200);
 
     return () => {
       chartContainerEl?.removeEventListener('mouseleave', handleMouseLeave);

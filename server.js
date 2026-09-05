@@ -6,6 +6,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { io: ioClient } = require('socket.io-client');
 const next = require('next');
+const { telegramSignalBot, TRADE_STATUS } = require('./src/lib/telegram-signal-bot');
 require('dotenv').config();
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -370,6 +371,84 @@ nextApp.prepare().then(() => {
     return res.json({ success: true, message: 'Tokens updated successfully' });
   });
 
+  // ==========================================
+  // TELEGRAM SIGNAL BOT REST API ENDPOINTS
+  // ==========================================
+
+  // GET /api/bot/config
+  app.get('/api/bot/config', (req, res) => {
+    return res.json({
+      success: true,
+      payload: telegramSignalBot.getStatusPayload()
+    });
+  });
+
+  // POST /api/bot/config
+  app.post('/api/bot/config', (req, res) => {
+    const success = telegramSignalBot.saveConfig(req.body);
+    syncBotChannels();
+    return res.json({
+      success: success,
+      message: success ? 'Cấu hình Bot Telegram đã được lưu thành công!' : 'Lỗi khi lưu cấu hình',
+      payload: telegramSignalBot.getStatusPayload()
+    });
+  });
+
+  // POST /api/bot/test
+  app.post('/api/bot/test', async (req, res) => {
+    const { botToken, chatId, message } = req.body;
+    const testText = message || `🤖 <b>CRAZII TELEGRAM SIGNAL BOT</b>\n\n✅ <i>Kết nối thành công!</i>\n⏰ Thời gian: ${new Date().toLocaleString('vi-VN')}\n⚡ Hệ thống Live Tracking tín hiệu đã sẵn sàng!`;
+    const result = await telegramSignalBot.sendTelegramMessage(testText, { botToken, chatId });
+    if (result.success) {
+      return res.json({ success: true, message: 'Đã gửi tin nhắn thử nghiệm thành công tới Telegram!', result });
+    } else {
+      return res.status(400).json({ success: false, message: result.error || 'Không thể gửi tin nhắn tới Telegram. Vui lòng kiểm tra Bot Token và Chat ID.', result });
+    }
+  });
+
+  // GET /api/bot/trades
+  app.get('/api/bot/trades', (req, res) => {
+    return res.json({
+      success: true,
+      activeTrades: Array.from(telegramSignalBot.activeTrades.values()),
+      tradeHistory: telegramSignalBot.tradeHistory,
+      stats: telegramSignalBot.getStatusPayload().stats
+    });
+  });
+
+  // POST /api/bot/trades/test-signal (Interactive simulator trigger)
+  app.post('/api/bot/trades/test-signal', async (req, res) => {
+    const result = await telegramSignalBot.triggerTestSignal(req.body);
+    return res.json(result);
+  });
+
+  // POST /api/bot/trades/:id/simulate-status (Interactive simulator state update & live edit)
+  app.post('/api/bot/trades/:id/simulate-status', async (req, res) => {
+    const tradeId = req.params.id;
+    const { status, reason } = req.body;
+    const trade = telegramSignalBot.activeTrades.get(tradeId);
+    if (!trade) {
+      return res.status(404).json({ success: false, message: 'Trade not found' });
+    }
+    await telegramSignalBot.transitionTradeStatus(trade, Number(status), reason || 'Simulated state change');
+    return res.json({ success: true, trade });
+  });
+
+  // POST /api/bot/trades/:id/close
+  app.post('/api/bot/trades/:id/close', async (req, res) => {
+    const tradeId = req.params.id;
+    const status = req.body.status !== undefined ? Number(req.body.status) : TRADE_STATUS.CUT_EARLY_PROFIT;
+    const result = await telegramSignalBot.manualCloseTrade(tradeId, status);
+    return res.json(result);
+  });
+
+  // POST /api/bot/trades/clear-history
+  app.post('/api/bot/trades/clear-history', (req, res) => {
+    telegramSignalBot.tradeHistory = [];
+    telegramSignalBot.saveTrades();
+    return res.json({ success: true, message: 'Đã xóa toàn bộ lịch sử lệnh!' });
+  });
+
   // REST API: /api/candles
   app.get('/api/candles', async (req, res) => {
     const code = req.query.code || 'XAUUSD.ca_5';
@@ -528,10 +607,20 @@ nextApp.prepare().then(() => {
 
     targetSocket.on('data', (...args) => {
       io.emit('data', ...args);
+      try {
+        telegramSignalBot.processDataEvent(args[0]);
+      } catch (err) {
+        console.error(`[Telegram Bot Error on Data]`, err.message);
+      }
     });
 
     targetSocket.on('price', (...args) => {
       io.emit('price', ...args);
+      try {
+        telegramSignalBot.processTickEvent(args[0], args[1]);
+      } catch (err) {
+        console.error(`[Telegram Bot Error on Tick]`, err.message);
+      }
     });
 
     targetSocket.on('connect_error', (err) => {
@@ -564,6 +653,23 @@ nextApp.prepare().then(() => {
     isUpstreamConnected = false;
     activeChannels.clear();
   }
+
+  // Helper to sync bot monitored symbols into activeChannels
+  function syncBotChannels() {
+    if (telegramSignalBot.config.enabled && Array.isArray(telegramSignalBot.config.monitoredSymbols)) {
+      telegramSignalBot.config.monitoredSymbols.forEach(sym => {
+        if (sym && typeof sym === 'string') {
+          activeChannels.add(sym.trim());
+          const base = sym.split('_')[0];
+          if (base) activeChannels.add(base);
+        }
+      });
+      if (activeChannels.size > 0 && (!targetSocket || !targetSocket.connected)) {
+        connectUpstreamWebSocket();
+      }
+    }
+  }
+  syncBotChannels();
 
   // Watchdog: Only keeps connection alive if there are active channels requested
   setInterval(() => {

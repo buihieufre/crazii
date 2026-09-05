@@ -24,3 +24,7 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Local bot data and trade state
+data/
+data/*
