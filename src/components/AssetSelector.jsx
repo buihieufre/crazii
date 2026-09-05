@@ -8,29 +8,64 @@ export default function AssetSelector({
   onClose,
   currentSymbolCode,
   currentTimeframeCode,
-  onSelectAsset
+  targetSlotIndex = 0,
+  activeLayout = '1',
+  onSelectAsset,
 }) {
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
   if (!isOpen) return null;
 
-  const categories = ['All', ...ASSETS_DATA.map(c => c.name)];
+  const categories = ['All', ...ASSETS_DATA.map((c) => c.name)];
 
-  const filteredSymbols = ALL_SYMBOLS.filter(sym => {
-    const matchesCat = activeCategory === 'All' || ASSETS_DATA.find(c => c.name === activeCategory)?.symbols.some(s => s.code === sym.code);
-    const matchesSearch = !searchQuery.trim() || sym.name.toLowerCase().includes(searchQuery.toLowerCase()) || sym.code.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredSymbols = ALL_SYMBOLS.filter((sym) => {
+    const matchesCat =
+      activeCategory === 'All' ||
+      ASSETS_DATA.find((c) => c.name === activeCategory)?.symbols.some((s) => s.code === sym.code);
+    const matchesSearch =
+      !searchQuery.trim() ||
+      sym.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      sym.code.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCat && matchesSearch;
   });
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-card" style={{ maxWidth: 640, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
-        <div className="modal-header" style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-color)' }}>
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="modal-card"
+        style={{ maxWidth: 640, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+      >
+        <div
+          className="modal-header"
+          style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-color)' }}
+        >
           <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>📊 Markets & Assets Watchlist</span>
+            {activeLayout !== '1' && (
+              <span
+                style={{
+                  fontSize: 11,
+                  background: 'rgba(0, 229, 255, 0.15)',
+                  color: '#00E5FF',
+                  border: '1px solid rgba(0, 229, 255, 0.4)',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontWeight: 700,
+                }}
+              >
+                Khung #{targetSlotIndex + 1}
+              </span>
+            )}
           </h3>
-          <button className="btn" onClick={onClose}>&times;</button>
+          <button className="btn" onClick={onClose}>
+            &times;
+          </button>
         </div>
 
         {/* Search & Categories */}
@@ -45,8 +80,16 @@ export default function AssetSelector({
             autoFocus
           />
 
-          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 6, scrollbarWidth: 'none' }}>
-            {categories.map(cat => (
+          <div
+            style={{
+              display: 'flex',
+              gap: 4,
+              overflowX: 'auto',
+              paddingBottom: 6,
+              scrollbarWidth: 'none',
+            }}
+          >
+            {categories.map((cat) => (
               <button
                 key={cat}
                 className={`tf-btn ${activeCategory === cat ? 'active' : ''}`}
@@ -60,7 +103,16 @@ export default function AssetSelector({
         </div>
 
         {/* Asset List */}
-        <div style={{ flex: 1, overflowY: 'auto', marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            marginTop: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
           {filteredSymbols.map((sym) => {
             const isSelected = sym.code === currentSymbolCode;
             return (
@@ -76,7 +128,7 @@ export default function AssetSelector({
                   justifyContent: 'space-between',
                   gap: 10,
                   transition: 'all 0.15s ease',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
                 onClick={() => {
                   const defaultTf = sym.timeframes[0];
@@ -90,15 +142,38 @@ export default function AssetSelector({
                     <img
                       src={sym.image.split(';')[0]}
                       alt={sym.name}
-                      style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover', background: '#202533' }}
-                      onError={(e) => { e.target.style.display = 'none'; }}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        background: '#202533',
+                      }}
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                      }}
                     />
                   )}
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: isSelected ? '#FFEB3B' : '#ffffff' }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: isSelected ? '#FFEB3B' : '#ffffff',
+                      }}
+                    >
                       {sym.code}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--text-muted)',
+                        maxWidth: 240,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
                       {sym.name}
                     </div>
                   </div>
@@ -107,13 +182,20 @@ export default function AssetSelector({
                 {/* Right: Price & Timeframe Badges */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, fontWeight: 700, color: '#00E676' }}>
+                    <div
+                      style={{
+                        fontFamily: 'JetBrains Mono',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: '#00E676',
+                      }}
+                    >
                       {sym.price}
                     </div>
                   </div>
 
                   <div style={{ display: 'flex', gap: 3 }}>
-                    {sym.timeframes.map(tf => {
+                    {sym.timeframes.map((tf) => {
                       const isTfSelected = tf.code === currentTimeframeCode;
                       return (
                         <button
@@ -137,7 +219,14 @@ export default function AssetSelector({
           })}
 
           {filteredSymbols.length === 0 && (
-            <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 12 }}>
+            <div
+              style={{
+                textAlign: 'center',
+                padding: 24,
+                color: 'var(--text-muted)',
+                fontSize: 12,
+              }}
+            >
               Không tìm thấy tài sản nào phù hợp.
             </div>
           )}

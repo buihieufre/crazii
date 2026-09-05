@@ -6,8 +6,6 @@
 let flashTimeout = null;
 
 export function updateOhlcHeader(data, decimals = 2) {
-  if (!data) return;
-
   const oEl = document.getElementById('ohlc-val-o');
   const hEl = document.getElementById('ohlc-val-h');
   const lEl = document.getElementById('ohlc-val-l');
@@ -15,6 +13,20 @@ export function updateOhlcHeader(data, decimals = 2) {
   const twbOEl = document.getElementById('ohlc-val-twb-o');
   const twbCEl = document.getElementById('ohlc-val-twb-c');
   const tagEl = document.getElementById('ohlc-twb-tag');
+
+  if (!data) {
+    if (oEl) oEl.innerText = '-';
+    if (hEl) hEl.innerText = '-';
+    if (lEl) lEl.innerText = '-';
+    if (cEl) {
+      cEl.innerText = '-';
+      cEl.className = 'ohlc-val';
+    }
+    if (twbOEl) twbOEl.innerText = '-';
+    if (twbCEl) twbCEl.innerText = '-';
+    if (tagEl) tagEl.style.display = 'none';
+    return;
+  }
 
   const dec = typeof decimals === 'number' ? decimals : 2;
 

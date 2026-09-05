@@ -1019,7 +1019,7 @@
     }
 
     /**
-     * Timestamp Parser
+     * Timestamp Parser (converts Crazii broker UTC+3 to true UTC)
      */
     function parseTimestampToSeconds(ts) {
       if (typeof ts === 'number') {
@@ -1034,7 +1034,7 @@
           if (datePart.length === 3 && timePart.length >= 2) {
             const [y, m, d] = datePart;
             const hh = timePart[0] || 0, mm = timePart[1] || 0, ss = timePart[2] || 0;
-            return Math.floor(Date.UTC(y, m - 1, d, hh, mm, ss) / 1000);
+            return Math.floor(Date.UTC(y, m - 1, d, hh, mm, ss) / 1000) - 10800;
           }
         }
         const parsed = Date.parse(trimmed);

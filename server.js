@@ -24,44 +24,65 @@ function decodeJwt(token) {
   if (parts.length < 2) return null;
   try {
     const payloadStr = Buffer.from(parts[1], 'base64').toString('utf8');
-    return JSON.parse(payloadStr);
+    const parsed = JSON.parse(payloadStr);
+    if (parsed && typeof parsed === 'object') {
+      delete parsed.upn;
+    }
+    return parsed;
   } catch (e) {
     return null;
   }
 }
 
-/**
- * Helper to get active Refresh Token (3-Day token)
- */
-function getActiveRefreshToken() {
+// --- IN-MEMORY TOKEN SINGLETON ---
+let memoryAccessToken = '';
+let memoryRefreshToken = '';
+let memoryDeviceId = 'fb70bf82-5d83-4c70-b7e6-9896bda770e7';
+
+function initTokensFromEnv() {
   try {
     const envPath = path.join(__dirname, '.env');
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
-      const match = envContent.match(/^(?:CRAZII_REFRESH_TOKEN|REFRESH_TOKEN)=(.*)$/m);
-      if (match && match[1].trim() && !match[1].includes('PLACEHOLDER')) {
-        return match[1].trim();
+      const authMatch = envContent.match(/^(?:CRAZII_ACCESS_TOKEN|CRAZII_AUTH_TOKEN|AUTH_TOKEN)=(.*)$/m);
+      if (authMatch && authMatch[1].trim() && !authMatch[1].includes('PLACEHOLDER')) {
+        memoryAccessToken = authMatch[1].trim().replace(/^Bearer\s+/i, '');
+      }
+      const refMatch = envContent.match(/^(?:CRAZII_REFRESH_TOKEN|REFRESH_TOKEN)=(.*)$/m);
+      if (refMatch && refMatch[1].trim() && !refMatch[1].includes('PLACEHOLDER')) {
+        memoryRefreshToken = refMatch[1].trim().replace(/^Bearer\s+/i, '');
+      }
+      const devMatch = envContent.match(/^(?:CRAZII_DEVICE_ID|DEVICE_ID)=(.*)$/m);
+      if (devMatch && devMatch[1].trim() && !devMatch[1].includes('PLACEHOLDER')) {
+        memoryDeviceId = devMatch[1].trim();
       }
     }
-  } catch (e) { }
-  return process.env.CRAZII_REFRESH_TOKEN || process.env.REFRESH_TOKEN || '';
+  } catch (e) {}
+
+  if (!memoryAccessToken) {
+    memoryAccessToken = (process.env.CRAZII_ACCESS_TOKEN || process.env.CRAZII_AUTH_TOKEN || process.env.AUTH_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
+  }
+  if (!memoryRefreshToken) {
+    memoryRefreshToken = (process.env.CRAZII_REFRESH_TOKEN || process.env.REFRESH_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
+  }
+  if (!memoryDeviceId || memoryDeviceId.includes('PLACEHOLDER')) {
+    memoryDeviceId = (process.env.CRAZII_DEVICE_ID || process.env.DEVICE_ID || 'fb70bf82-5d83-4c70-b7e6-9896bda770e7').trim();
+  }
+}
+initTokensFromEnv();
+
+/**
+ * Helper to get active Refresh Token (3-Day token)
+ */
+function getActiveRefreshToken() {
+  return memoryRefreshToken || '';
 }
 
 /**
  * Helper to get active Device ID
  */
 function getActiveDeviceId() {
-  try {
-    const envPath = path.join(__dirname, '.env');
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, 'utf8');
-      const match = envContent.match(/^(?:CRAZII_DEVICE_ID|DEVICE_ID)=(.*)$/m);
-      if (match && match[1].trim() && !match[1].includes('PLACEHOLDER')) {
-        return match[1].trim();
-      }
-    }
-  } catch (e) { }
-  return process.env.CRAZII_DEVICE_ID || process.env.DEVICE_ID || 'fb70bf82-5d83-4c70-b7e6-9896bda770e7';
+  return memoryDeviceId || 'fb70bf82-5d83-4c70-b7e6-9896bda770e7';
 }
 
 /**
@@ -72,31 +93,14 @@ function getActiveAuthToken(req) {
     const qJwt = decodeJwt(req.query.token);
     const nowSec = Math.floor(Date.now() / 1000);
     if (qJwt && qJwt.exp && qJwt.exp > nowSec) {
-      return req.query.token;
+      return req.query.token.replace(/^Bearer\s+/i, '').trim();
     }
   }
-
-  const envToken = process.env.CRAZII_ACCESS_TOKEN || process.env.CRAZII_AUTH_TOKEN || process.env.AUTH_TOKEN;
-  if (envToken && envToken.trim() && !envToken.includes('PLACEHOLDER')) {
-    return envToken.trim();
-  }
-
-  try {
-    const envPath = path.join(__dirname, '.env');
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, 'utf8');
-      const match = envContent.match(/^(?:CRAZII_ACCESS_TOKEN|CRAZII_AUTH_TOKEN|AUTH_TOKEN)=(.*)$/m);
-      if (match && match[1].trim() && !match[1].includes('PLACEHOLDER')) {
-        return match[1].trim();
-      }
-    }
-  } catch (e) { }
-
-  return '';
+  return memoryAccessToken || '';
 }
 
 /**
- * Helper to persist tokens to .env file and memory
+ * Helper to persist tokens to memory and .env file
  */
 function updateEnvTokens({ authToken, refreshToken }) {
   try {
@@ -105,8 +109,11 @@ function updateEnvTokens({ authToken, refreshToken }) {
 
     if (authToken) {
       const cleanAuth = authToken.replace(/^Bearer\s+/i, '').trim();
+      memoryAccessToken = cleanAuth;
       process.env.CRAZII_ACCESS_TOKEN = cleanAuth;
-      process.env.AUTH_TOKEN = cleanAuth;
+      delete process.env.CRAZII_AUTH_TOKEN;
+      delete process.env.AUTH_TOKEN;
+
       if (/^CRAZII_ACCESS_TOKEN=/m.test(content)) {
         content = content.replace(/^CRAZII_ACCESS_TOKEN=.*$/m, `CRAZII_ACCESS_TOKEN=${cleanAuth}`);
       } else if (/^AUTH_TOKEN=/m.test(content)) {
@@ -118,8 +125,10 @@ function updateEnvTokens({ authToken, refreshToken }) {
 
     if (refreshToken) {
       const cleanRefresh = refreshToken.replace(/^Bearer\s+/i, '').trim();
+      memoryRefreshToken = cleanRefresh;
       process.env.CRAZII_REFRESH_TOKEN = cleanRefresh;
-      process.env.REFRESH_TOKEN = cleanRefresh;
+      delete process.env.REFRESH_TOKEN;
+
       if (/^CRAZII_REFRESH_TOKEN=/m.test(content)) {
         content = content.replace(/^CRAZII_REFRESH_TOKEN=.*$/m, `CRAZII_REFRESH_TOKEN=${cleanRefresh}`);
       } else if (/^REFRESH_TOKEN=/m.test(content)) {
@@ -129,8 +138,11 @@ function updateEnvTokens({ authToken, refreshToken }) {
       }
     }
 
-    fs.writeFileSync(envPath, content, 'utf8');
-    console.log(`[Token] ✅ Successfully saved token(s) to .env!`);
+    const existingContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    if (existingContent.trim() !== content.trim()) {
+      fs.writeFileSync(envPath, content, 'utf8');
+      console.log(`[Token] ✅ Successfully saved token(s) to .env!`);
+    }
     return true;
   } catch (err) {
     console.error(`[Token] Failed to write token to .env:`, err.message);
@@ -154,105 +166,138 @@ nextApp.prepare().then(() => {
     }
   });
 
+  // Mutex for single-flight token refresh
+  let inFlightRefreshPromise = null;
+
   /**
    * Core Function: Execute Refresh Token with Crazii API using the 3-day Refresh Token
    */
   async function executeRefreshToken(customRefreshToken = null) {
-    const refreshToken = (customRefreshToken || getActiveRefreshToken()).replace(/^Bearer\s+/i, '').trim();
-    const deviceId = getActiveDeviceId();
-
-    if (!refreshToken || refreshToken.includes('PLACEHOLDER')) {
-      console.warn(`[Token Refresh] ❌ No valid REFRESH_TOKEN found to generate new Access Token.`);
-      return { success: false, message: 'No valid Refresh Token configured. Please set REFRESH_TOKEN in .env or UI.' };
+    // If no custom token is passed, check if the current token is still valid (> 2 minutes left)
+    if (!customRefreshToken) {
+      const currentAuth = getActiveAuthToken();
+      const jwt = decodeJwt(currentAuth);
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (jwt && jwt.exp && (jwt.exp - nowSec > 120)) {
+        return {
+          success: true,
+          token: currentAuth,
+          accessToken: currentAuth,
+          accessPayload: jwt,
+          refreshPayload: decodeJwt(getActiveRefreshToken())
+        };
+      }
     }
 
-    const targetUrl = 'https://sale-api.crazii.com/api/v1/users/refresh-token';
-    const headers = {
-      'Accept': 'application/json, text/plain, */*',
-      'Content-Type': 'application/json',
-      'Device-Id': deviceId,
-      'Origin': 'https://crazii.com',
-      'Referer': 'https://crazii.com/',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0'
-    };
+    // Single-flight deduplication: If a refresh is already in flight, reuse its promise
+    if (inFlightRefreshPromise) {
+      return await inFlightRefreshPromise;
+    }
 
-    console.log(`[Token Refresh] 🔄 Refreshing 15-minute Access Token using 3-day Refresh Token...`);
-    try {
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({ token: refreshToken })
-      });
+    inFlightRefreshPromise = (async () => {
+      const refreshToken = (customRefreshToken || getActiveRefreshToken()).replace(/^Bearer\s+/i, '').trim();
+      const deviceId = getActiveDeviceId();
 
-      if (!response.ok) {
-        const errText = await response.text();
-        console.warn(`[Token Refresh] ❌ Crazii API rejected refresh request (${response.status}): ${errText}`);
-        return { success: false, status: response.status, message: 'Refresh Token rejected by Crazii', raw: errText };
+      if (!refreshToken || refreshToken.includes('PLACEHOLDER')) {
+        console.warn(`[Token Refresh] ❌ No valid REFRESH_TOKEN found to generate new Access Token.`);
+        return { success: false, message: 'No valid Refresh Token configured. Please set REFRESH_TOKEN in .env or UI.' };
       }
 
-      const data = await response.json();
-      let newAccessToken = null;
-      let newRefreshToken = null;
-
-      if (data && data.data) {
-        newAccessToken = data.data.accessToken;
-        newRefreshToken = data.data.refreshToken;
-      } else if (data && data.accessToken) {
-        newAccessToken = data.accessToken;
-      }
-
-      if (!newAccessToken) {
-        console.warn(`[Token Refresh] ⚠️ Response did not contain accessToken:`, data);
-        return { success: false, message: 'No accessToken in response', data };
-      }
-
-      const decodedAccess = decodeJwt(newAccessToken);
-      const decodedRefresh = decodeJwt(newRefreshToken || refreshToken);
-
-      console.log(`[Token Refresh] 🎉 Got new Access Token! (Expires in ~15 mins: ${new Date((decodedAccess?.exp || 0) * 1000).toLocaleTimeString()})`);
-
-      updateEnvTokens({
-        authToken: newAccessToken,
-        refreshToken: newRefreshToken || (customRefreshToken ? refreshToken : null)
-      });
-
-      connectUpstreamWebSocket();
-
-      io.emit('token_refreshed', {
-        success: true,
-        token: newAccessToken,
-        accessToken: newAccessToken,
-        accessPayload: decodedAccess,
-        refreshPayload: decodedRefresh,
-        timestamp: Date.now()
-      });
-
-      return {
-        success: true,
-        token: newAccessToken,
-        accessToken: newAccessToken,
-        accessPayload: decodedAccess,
-        refreshPayload: decodedRefresh
+      const targetUrl = 'https://sale-api.crazii.com/api/v1/users/refresh-token';
+      const headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'Content-Type': 'application/json',
+        'Device-Id': deviceId,
+        'Origin': 'https://crazii.com',
+        'Referer': 'https://crazii.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0'
       };
-    } catch (error) {
-      console.error(`[Token Refresh Error]`, error.message);
-      return { success: false, error: error.message };
-    }
+
+      console.log(`[Token Refresh] 🔄 Refreshing 15-minute Access Token using 3-day Refresh Token...`);
+      try {
+        const response = await fetch(targetUrl, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ token: refreshToken })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          console.warn(`[Token Refresh] ❌ Crazii API rejected refresh request (${response.status}): ${errText}`);
+          return { success: false, status: response.status, message: 'Refresh Token rejected by Crazii', raw: errText };
+        }
+
+        const data = await response.json();
+        let newAccessToken = null;
+        let newRefreshToken = null;
+
+        if (data && data.data) {
+          newAccessToken = data.data.accessToken;
+          newRefreshToken = data.data.refreshToken;
+        } else if (data && data.accessToken) {
+          newAccessToken = data.accessToken;
+        }
+
+        if (!newAccessToken) {
+          console.warn(`[Token Refresh] ⚠️ Response did not contain accessToken:`, data);
+          return { success: false, message: 'No accessToken in response', data };
+        }
+
+        const decodedAccess = decodeJwt(newAccessToken);
+        const decodedRefresh = decodeJwt(newRefreshToken || refreshToken);
+
+        console.log(`[Token Refresh] 🎉 Got new Access Token! (Expires in ~15 mins: ${new Date((decodedAccess?.exp || 0) * 1000).toLocaleTimeString()})`);
+
+        updateEnvTokens({
+          authToken: newAccessToken,
+          refreshToken: newRefreshToken || (customRefreshToken ? refreshToken : null)
+        });
+
+        // Only reconnect WebSocket if not connected
+        if (!targetSocket || !targetSocket.connected) {
+          connectUpstreamWebSocket();
+        }
+
+        io.emit('token_refreshed', {
+          success: true,
+          token: newAccessToken,
+          accessToken: newAccessToken,
+          accessPayload: decodedAccess,
+          refreshPayload: decodedRefresh,
+          timestamp: Date.now()
+        });
+
+        return {
+          success: true,
+          token: newAccessToken,
+          accessToken: newAccessToken,
+          accessPayload: decodedAccess,
+          refreshPayload: decodedRefresh
+        };
+      } catch (error) {
+        console.error(`[Token Refresh Error]`, error.message);
+        return { success: false, error: error.message };
+      } finally {
+        inFlightRefreshPromise = null;
+      }
+    })();
+
+    return await inFlightRefreshPromise;
   }
 
-  // Background Scheduler: Auto-Refresh Access Token every 30s if <= 3 minutes left
+  // Background Scheduler: Proactively auto-refresh Access Token every 30s only when <= 2 minutes left
   setInterval(async () => {
     const currentAuth = getActiveAuthToken();
     const jwt = decodeJwt(currentAuth);
     const nowSec = Math.floor(Date.now() / 1000);
 
-    if (!jwt || !jwt.exp || (jwt.exp - nowSec <= 180)) {
-      console.log(`[Auto-Refresher] ⏳ Access token expiring or missing (TimeLeft: ${jwt?.exp ? jwt.exp - nowSec : 0}s). Auto-refreshing...`);
+    if (!jwt || !jwt.exp || (jwt.exp - nowSec <= 120)) {
+      console.log(`[Auto-Refresher] ⏳ Access token expiring soon (TimeLeft: ${jwt?.exp ? jwt.exp - nowSec : 0}s). Proactively auto-refreshing in background...`);
       await executeRefreshToken();
     }
   }, 30000);
 
-  // REST API: /api/token-info
+  // REST API: /api/token-info (Pure query without triggering redundant refreshes)
   app.get('/api/token-info', (req, res) => {
     const auth = getActiveAuthToken(req);
     const refresh = getActiveRefreshToken();
@@ -481,12 +526,12 @@ nextApp.prepare().then(() => {
       });
     }
 
-    targetSocket.on('data', (payload) => {
-      io.emit('data', payload);
+    targetSocket.on('data', (...args) => {
+      io.emit('data', ...args);
     });
 
-    targetSocket.on('price', (symbol, price) => {
-      io.emit('price', symbol, price);
+    targetSocket.on('price', (...args) => {
+      io.emit('price', ...args);
     });
 
     targetSocket.on('connect_error', (err) => {
@@ -538,10 +583,12 @@ nextApp.prepare().then(() => {
     clientSocket.on('subscribe', (channel) => {
       if (channel && typeof channel === 'string') {
         activeChannels.add(channel);
+        activeChannels.add('price');
         if (!targetSocket || !targetSocket.connected) {
           connectUpstreamWebSocket();
         } else {
           targetSocket.emit('subscribe', channel);
+          targetSocket.emit('subscribe', 'price');
         }
       }
     });

@@ -4,17 +4,49 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
 import Header from '@/components/Header';
 import ChartContainer from '@/components/ChartContainer';
+import LeftDrawingPanel, { DRAWING_TOOLS } from '@/components/LeftDrawingPanel';
 import TokenModal from '@/components/TokenModal';
 import AssetSelector from '@/components/AssetSelector';
+import TimezoneModal from '@/components/TimezoneModal';
 import { calculateBarCountdown } from '@/lib/utils';
 import { updateHeaderCountdown } from '@/lib/ohlc-updater';
 import { getSymbolByCode } from '@/lib/assets-data';
+import { getDefaultTimezone } from '@/lib/timezones';
 
 export default function TerminalPage() {
-  const chartRef = useRef(null);
+  // Layout and Multi-Chart State
+  const [activeLayout, setActiveLayout] = useState('1'); // '1' | '2-col' | '2-row' | '3-col' | '3-grid' | '4-grid'
+  const [activeSlotIndex, setActiveSlotIndex] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Drawing tools state
+  const [activeDrawingTool, setActiveDrawingTool] = useState(DRAWING_TOOLS.CROSSHAIR);
+  const [isDrawingsHidden, setIsDrawingsHidden] = useState(false);
+  const [isDrawingsLocked, setIsDrawingsLocked] = useState(false);
+
+  // Autosave State & Persistence
+  const [isAutoSave, setIsAutoSave] = useState(true);
+  const [lastSavedTime, setLastSavedTime] = useState(null);
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'idle'
+  const isHydratedRef = useRef(false);
+
+  // 4 Chart Slot configurations
+  const [slots, setSlots] = useState([
+    { id: 0, code: null, symbolObj: null, tfName: '5m', tfMinutes: 5 },
+    { id: 1, code: null, symbolObj: null, tfName: '15m', tfMinutes: 15 },
+    { id: 2, code: null, symbolObj: null, tfName: '1D', tfMinutes: 1440 },
+    { id: 3, code: null, symbolObj: null, tfName: '5m', tfMinutes: 5 },
+  ]);
+
+  const chartRef0 = useRef(null);
+  const chartRef1 = useRef(null);
+  const chartRef2 = useRef(null);
+  const chartRef3 = useRef(null);
+  const chartRefs = [chartRef0, chartRef1, chartRef2, chartRef3];
+
   const socketRef = useRef(null);
 
-  // Standby initial state: No asset selected by default to avoid Crazii session conflict
+  // Standby initial state
   const [activeSymbolObj, setActiveSymbolObj] = useState(null);
   const [currentCode, setCurrentCode] = useState(null);
   const [timeframeLabel, setTimeframeLabel] = useState('5m');
@@ -23,16 +55,72 @@ export default function TerminalPage() {
   const [tokenInfo, setTokenInfo] = useState(null);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [isAssetSelectorOpen, setIsAssetSelectorOpen] = useState(true); // Open watchlist on arrival
+  const [activeTimezone, setActiveTimezone] = useState(getDefaultTimezone);
+  const [isTimezoneModalOpen, setIsTimezoneModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notification, setNotification] = useState(null);
   const [ksiLabelText, setKsiLabelText] = useState('BOYS BUYING (KSI)');
   const [kcxLabelText, setKcxLabelText] = useState('BEARISHNESS (KCX)');
+
+  const activeSlotIndexRef = useRef(activeSlotIndex);
+  activeSlotIndexRef.current = activeSlotIndex;
+
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+
+  const activeLayoutRef = useRef(activeLayout);
+  activeLayoutRef.current = activeLayout;
 
   const currentCodeRef = useRef(currentCode);
   currentCodeRef.current = currentCode;
 
   const timeframeMinutesRef = useRef(timeframeMinutes);
   timeframeMinutesRef.current = timeframeMinutes;
+
+  // Helper to subscribe visible slot codes on active socket connection
+  const subscribeVisibleSlots = useCallback(() => {
+    if (!socketRef.current || !socketRef.current.connected) return;
+    const count = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
+    for (let i = 0; i < count; i++) {
+      const slot = slotsRef.current[i];
+      if (slot && slot.code) {
+        socketRef.current.emit('subscribe', slot.code);
+        const sym = slot.code.split('_')[0];
+        if (sym && sym !== slot.code) {
+          socketRef.current.emit('subscribe', sym);
+        }
+      }
+    }
+    socketRef.current.emit('subscribe', 'price');
+  }, []);
+
+  // Fullscreen event listener
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(!!document.fullscreenElement);
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const handleToggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.warn('Fullscreen error:', err);
+      });
+    } else {
+      document.exitFullscreen().catch((err) => {
+        console.warn('Exit fullscreen error:', err);
+      });
+    }
+  }, []);
+
+  const handleSelectTimezone = useCallback((tz) => {
+    setActiveTimezone(tz);
+    try {
+      localStorage.setItem('crazii_timezone_id', tz.id);
+    } catch (e) {}
+  }, []);
 
   // Fetch Token Info from Backend
   const fetchTokenInfo = useCallback(async () => {
@@ -46,8 +134,8 @@ export default function TerminalPage() {
     }
   }, []);
 
-  // Fetch Historical Candles Strictly On-Demand (Only when an asset is selected)
-  const fetchCandles = useCallback(async (codeToFetch = currentCode, isSilent = false, isInitial = false) => {
+  // Fetch Historical Candles for a specific Slot
+  const fetchCandlesForSlot = useCallback(async (slotIndex, codeToFetch, isSilent = false, isInitial = false) => {
     if (!codeToFetch) return;
     if (!isSilent) setIsRefreshing(true);
 
@@ -95,8 +183,16 @@ export default function TerminalPage() {
 
       setNotification(null);
 
-      if (chartRef.current) {
-        chartRef.current.renderDataset(list, isInitial);
+      let targetChartRef = chartRefs[slotIndex];
+      let retryCount = 0;
+      while ((!targetChartRef || !targetChartRef.current) && retryCount < 10) {
+        await new Promise((r) => setTimeout(r, 80));
+        targetChartRef = chartRefs[slotIndex];
+        retryCount++;
+      }
+
+      if (targetChartRef && targetChartRef.current) {
+        targetChartRef.current.renderDataset(list, isInitial);
       }
 
       if (socketRef.current && socketRef.current.connected) {
@@ -113,38 +209,337 @@ export default function TerminalPage() {
     } finally {
       if (!isSilent) setIsRefreshing(false);
     }
-  }, [currentCode]);
+  }, []);
 
-  // Handle Asset Switch from Watchlist (Activates Streaming strictly on click)
+  // Synchronize drawings across visible slots sharing the same symbol
+  const handleSyncDrawings = useCallback((symbolKey, newDrawings, sourceSlotIndex) => {
+    const visibleCount = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
+    for (let i = 0; i < visibleCount; i++) {
+      if (i !== sourceSlotIndex) {
+        const slot = slotsRef.current[i];
+        const slotSym = slot?.code ? slot.code.split('_')[0] : (i === 0 ? currentCodeRef.current?.split('_')[0] : null);
+        if (!symbolKey || !slotSym || slotSym === symbolKey) {
+          chartRefs[i].current?.syncDrawings(newDrawings);
+        }
+      }
+    }
+  }, []);
+
+  // Synchronize crosshair across all visible slots
+  const handleSyncCrosshair = useCallback((time, price, sourceSlotIndex) => {
+    const visibleCount = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
+    for (let i = 0; i < visibleCount; i++) {
+      if (i !== sourceSlotIndex) {
+        if (time) {
+          chartRefs[i].current?.syncCrosshair(time, price);
+        } else {
+          chartRefs[i].current?.clearCrosshair();
+        }
+      }
+    }
+  }, []);
+
+  const renderedCodesRef = useRef({});
+
+  // 1. Initial Load: Hydrate Saved Layout from LocalStorage
+  useEffect(() => {
+    let hydratedSlots = null;
+    let hydratedLayout = '1';
+    let hydratedCode = null;
+
+    try {
+      const saved = localStorage.getItem('crazii_chart_autosave_v1');
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data && typeof data === 'object') {
+          if (data.layout) {
+            hydratedLayout = data.layout;
+            setActiveLayout(data.layout);
+          }
+          if (data.activeSlotIndex !== undefined) setActiveSlotIndex(data.activeSlotIndex);
+          if (data.isAutoSave !== undefined) setIsAutoSave(data.isAutoSave);
+          if (data.lastSavedTime) setLastSavedTime(data.lastSavedTime);
+
+          if (Array.isArray(data.slots) && data.slots.length === 4) {
+            const restoredSlots = data.slots.map((s, idx) => {
+              const symCode = s?.code ? s.code.split('_')[0] : null;
+              const symObj = s?.symbolObj || (symCode ? getSymbolByCode(symCode) : null);
+              return {
+                id: idx,
+                code: s?.code || null,
+                symbolObj: symObj,
+                tfName: s?.tfName || '5m',
+                tfMinutes: s?.tfMinutes || 5,
+              };
+            });
+            hydratedSlots = restoredSlots;
+            setSlots(restoredSlots);
+          }
+
+          if (data.currentCode) {
+            hydratedCode = data.currentCode;
+            setCurrentCode(data.currentCode);
+            setTimeframeLabel(data.timeframeLabel || '5m');
+            setTimeframeMinutes(data.timeframeMinutes || 5);
+            const symObj = getSymbolByCode(data.currentCode.split('_')[0]);
+            if (symObj) {
+              setActiveSymbolObj(symObj);
+              setIsAssetSelectorOpen(false);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to hydrate chart autosave:', e);
+    } finally {
+      isHydratedRef.current = true;
+    }
+
+    // Trigger immediate historical candle loading for all visible slots
+    const visibleCount = hydratedLayout === '1' ? 1 : (hydratedLayout.startsWith('2') ? 2 : (hydratedLayout.startsWith('3') ? 3 : 4));
+    setTimeout(() => {
+      for (let i = 0; i < visibleCount; i++) {
+        const code = hydratedSlots?.[i]?.code || (i === 0 ? hydratedCode : null);
+        if (code) {
+          renderedCodesRef.current[i] = code;
+          fetchCandlesForSlot(i, code, i > 0, true);
+        }
+      }
+    }, 60);
+  }, [fetchCandlesForSlot]);
+
+  // 2. Debounced Autosave on Any Layout / Slot / Timeframe Change
+  useEffect(() => {
+    if (!isHydratedRef.current) return;
+    if (!isAutoSave) return;
+
+    setSaveStatus('saving');
+    const timer = setTimeout(() => {
+      try {
+        const payload = {
+          layout: activeLayout,
+          activeSlotIndex,
+          slots: slotsRef.current,
+          currentCode,
+          timeframeLabel,
+          timeframeMinutes,
+          isAutoSave: true,
+          lastSavedTime: Date.now(),
+        };
+        localStorage.setItem('crazii_chart_autosave_v1', JSON.stringify(payload));
+        setLastSavedTime(payload.lastSavedTime);
+        setSaveStatus('saved');
+      } catch (e) {
+        setSaveStatus('idle');
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [activeLayout, activeSlotIndex, slots, currentCode, timeframeLabel, timeframeMinutes, isAutoSave]);
+
+  // Ensure visible slots with codes always have historical candles loaded
+  useEffect(() => {
+    if (!isHydratedRef.current) return;
+    const count = activeLayout === '1' ? 1 : (activeLayout.startsWith('2') ? 2 : (activeLayout.startsWith('3') ? 3 : 4));
+    for (let i = 0; i < count; i++) {
+      const slot = slots[i];
+      const code = slot?.code || (i === 0 ? currentCode : null);
+      if (code && renderedCodesRef.current[i] !== code) {
+        renderedCodesRef.current[i] = code;
+        fetchCandlesForSlot(i, code, i > 0, true);
+      }
+    }
+  }, [slots, activeLayout, currentCode, fetchCandlesForSlot]);
+
+  // Manual Save Now
+  const handleSaveNow = useCallback(() => {
+    setSaveStatus('saving');
+    try {
+      const payload = {
+        layout: activeLayoutRef.current,
+        activeSlotIndex,
+        slots: slotsRef.current,
+        currentCode: currentCodeRef.current,
+        timeframeLabel,
+        timeframeMinutes: timeframeMinutesRef.current,
+        isAutoSave,
+        lastSavedTime: Date.now(),
+      };
+      localStorage.setItem('crazii_chart_autosave_v1', JSON.stringify(payload));
+      setLastSavedTime(payload.lastSavedTime);
+      setSaveStatus('saved');
+    } catch (e) {
+      setSaveStatus('idle');
+    }
+  }, [activeSlotIndex, timeframeLabel, isAutoSave]);
+
+  // Toggle AutoSave
+  const handleToggleAutoSave = useCallback(() => {
+    setIsAutoSave((prev) => {
+      const next = !prev;
+      try {
+        const saved = localStorage.getItem('crazii_chart_autosave_v1');
+        if (saved) {
+          const data = JSON.parse(saved);
+          data.isAutoSave = next;
+          localStorage.setItem('crazii_chart_autosave_v1', JSON.stringify(data));
+        }
+      } catch (e) {}
+      return next;
+    });
+  }, []);
+
+  // Reset to Default Layout
+  const handleResetLayout = useCallback(() => {
+    setActiveLayout('1');
+    setActiveSlotIndex(0);
+    try {
+      localStorage.removeItem('crazii_chart_autosave_v1');
+    } catch (e) {}
+    setLastSavedTime(null);
+    setSaveStatus('saved');
+  }, []);
+
+  // Handle Asset Switch from Watchlist (Targeted to Active Slot)
   const handleSelectAsset = useCallback((symbolCode, tfCode, tfName, tfMinutes) => {
     const symObj = getSymbolByCode(symbolCode);
+    const targetSlotIndex = activeSlotIndex;
+
+    setSlots((prev) => {
+      const next = [...prev];
+      const isFirstEverPick = prev.every((s) => !s.code);
+      if (isFirstEverPick) {
+        const tfs = symObj?.timeframes || [];
+        return [
+          { id: 0, code: tfCode, symbolObj: symObj, tfName: tfName, tfMinutes: tfMinutes },
+          { id: 1, code: tfs[1]?.code || tfs[0]?.code || tfCode, symbolObj: symObj, tfName: tfs[1]?.name || '15m', tfMinutes: tfs[1]?.minutes || 15 },
+          { id: 2, code: tfs[2]?.code || tfs[0]?.code || tfCode, symbolObj: symObj, tfName: tfs[2]?.name || '1D', tfMinutes: tfs[2]?.minutes || 1440 },
+          { id: 3, code: tfs[3]?.code || tfs[0]?.code || tfCode, symbolObj: symObj, tfName: tfs[3]?.name || '5m', tfMinutes: tfs[3]?.minutes || 5 },
+        ];
+      }
+
+      next[targetSlotIndex] = {
+        id: targetSlotIndex,
+        code: tfCode,
+        symbolObj: symObj,
+        tfName: tfName,
+        tfMinutes: tfMinutes,
+      };
+      return next;
+    });
+
     setActiveSymbolObj(symObj);
     setCurrentCode(tfCode);
     setTimeframeLabel(tfName);
     setTimeframeMinutes(tfMinutes);
-    fetchCandles(tfCode, false, true);
-  }, [fetchCandles]);
+    setIsAssetSelectorOpen(false);
 
-  // Handle Timeframe Switch (Activates Streaming for chosen timeframe)
+    // Fetch candles for targeted slot
+    renderedCodesRef.current[targetSlotIndex] = tfCode;
+    fetchCandlesForSlot(targetSlotIndex, tfCode, false, true);
+
+    setTimeout(subscribeVisibleSlots, 100);
+  }, [activeSlotIndex, fetchCandlesForSlot, subscribeVisibleSlots]);
+
+  // Handle Timeframe Switch on focused slot (or global header)
   const handleSelectTimeframe = useCallback((code, label, minutes) => {
+    const targetSlotIndex = activeSlotIndex;
+    const currentSlot = slotsRef.current[targetSlotIndex];
+    const symObj = currentSlot?.symbolObj || activeSymbolObj;
+
     setCurrentCode(code);
     setTimeframeLabel(label);
     setTimeframeMinutes(minutes);
-    fetchCandles(code, false, true);
-  }, [fetchCandles]);
 
-  // Real-time Countdown Timer Loop (Direct DOM update at 60fps)
+    setSlots((prev) => {
+      const next = [...prev];
+      if (next[targetSlotIndex]) {
+        next[targetSlotIndex] = {
+          ...next[targetSlotIndex],
+          code,
+          tfName: label,
+          tfMinutes: minutes,
+          symbolObj: symObj,
+        };
+      }
+      return next;
+    });
+
+    renderedCodesRef.current[targetSlotIndex] = code;
+    fetchCandlesForSlot(targetSlotIndex, code, false, true);
+    setTimeout(subscribeVisibleSlots, 100);
+  }, [activeSlotIndex, activeSymbolObj, fetchCandlesForSlot, subscribeVisibleSlots]);
+
+  // Handle Slot Timeframe Switch directly from slot header
+  const handleSlotChangeTimeframe = useCallback((slotIndex, tf) => {
+    const slot = slotsRef.current[slotIndex];
+    if (!slot) return;
+    const symObj = slot.symbolObj || (slot.code ? getSymbolByCode(slot.code.split('_')[0]) : null) || activeSymbolObj;
+
+    setSlots((prev) => {
+      const next = [...prev];
+      next[slotIndex] = {
+        ...next[slotIndex],
+        code: tf.code,
+        tfName: tf.name,
+        tfMinutes: tf.minutes,
+        symbolObj: symObj,
+      };
+      return next;
+    });
+
+    if (slotIndex === activeSlotIndex) {
+      setCurrentCode(tf.code);
+      setTimeframeLabel(tf.name);
+      setTimeframeMinutes(tf.minutes);
+      setActiveSymbolObj(symObj);
+    }
+
+    renderedCodesRef.current[slotIndex] = tf.code;
+    fetchCandlesForSlot(slotIndex, tf.code, false, true);
+    setTimeout(subscribeVisibleSlots, 100);
+  }, [activeSlotIndex, activeSymbolObj, fetchCandlesForSlot, subscribeVisibleSlots]);
+
+  // Handle Chart Slot Selection (Immediately syncs active slot, symbol, timeframe, and topbar OHLC)
+  const handleSelectSlot = useCallback((index) => {
+    setActiveSlotIndex(index);
+    const slot = slotsRef.current[index] || {};
+    const slotSymbolObj = slot.symbolObj || (slot.code ? getSymbolByCode(slot.code.split('_')[0]) : null) || activeSymbolObj;
+    if (slot.code) {
+      setCurrentCode(slot.code);
+      setTimeframeLabel(slot.tfName || '5m');
+      setTimeframeMinutes(slot.tfMinutes || 5);
+      if (slotSymbolObj) setActiveSymbolObj(slotSymbolObj);
+    }
+    const targetChart = chartRefs[index]?.current;
+    if (targetChart && targetChart.refreshOhlcHeader) {
+      targetChart.refreshOhlcHeader();
+    }
+  }, [activeSymbolObj]);
+
+  // Handle Layout Switch
+  const handleSelectLayout = useCallback((newLayout) => {
+    setActiveLayout(newLayout);
+    const visibleCount = newLayout === '1' ? 1 : (newLayout.startsWith('2') ? 2 : (newLayout.startsWith('3') ? 3 : 4));
+
+    // Fetch data for any newly shown slot that has a code
+    for (let i = 0; i < visibleCount; i++) {
+      const slot = slotsRef.current[i];
+      if (slot && slot.code) {
+        fetchCandlesForSlot(i, slot.code, true, false);
+      }
+    }
+
+    setTimeout(subscribeVisibleSlots, 100);
+  }, [fetchCandlesForSlot, subscribeVisibleSlots]);
+
+  // Real-time Header Countdown Timer Loop (Only updates Header badge for focused slot)
   useEffect(() => {
     if (!currentCode) return;
 
     function updateCountdown() {
       const formatted = calculateBarCountdown(timeframeMinutesRef.current);
       updateHeaderCountdown(formatted);
-
-      const scaleCountdownEl = document.querySelector('.tv-scale-countdown-text');
-      if (scaleCountdownEl) {
-        scaleCountdownEl.innerText = formatted;
-      }
     }
 
     updateCountdown();
@@ -152,85 +547,111 @@ export default function TerminalPage() {
     return () => clearInterval(interval);
   }, [currentCode, timeframeMinutes]);
 
-  // Setup WebSocket Listener / Live Polling Fallback (STRICTLY ON-DEMAND when an asset is clicked)
+  // Persistent WebSocket Connection Lifecycle
   useEffect(() => {
-    if (!currentCode) {
-      setWsStatus('idle');
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-      return;
-    }
-
     let socket = null;
     let isVercel = false;
 
     if (typeof window !== 'undefined') {
-      isVercel = window.location.hostname.includes('vercel.app');
+      const host = window.location.hostname;
+      isVercel = host.includes('vercel.app');
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || (isVercel ? null : undefined);
-
-    if (wsUrl !== null) {
+    if (!isVercel) {
       try {
-        socket = io(wsUrl, {
+        socket = io(window.location.origin, {
           transports: ['websocket', 'polling'],
           reconnection: true,
-          reconnectionAttempts: 3,
-          reconnectionDelay: 2000,
-          timeout: 5000,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 1000,
+          timeout: 10000,
         });
         socketRef.current = socket;
 
         socket.on('connect', () => {
           setWsStatus('live');
-          socket.emit('subscribe', 'price');
-          socket.emit('subscribe', currentCodeRef.current);
+          setNotification(null);
+          subscribeVisibleSlots();
         });
 
-        socket.on('disconnect', () => {
-          setWsStatus('disconnected');
+        // 1. Listen for full candle CSV 'data' events from Crazii Relay
+        socket.on('data', (csvPayload) => {
+          if (!csvPayload) return;
+          const str = typeof csvPayload === 'string' ? csvPayload : (csvPayload.rawData || csvPayload.data || '');
+          if (!str) return;
+          const parts = str.split(',');
+          if (parts.length < 13) return;
+
+          const symbol = parts[2]?.trim();
+          const timeframe = parts[3]?.trim();
+          if (!symbol || !timeframe) return;
+
+          const count = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
+
+          for (let idx = 0; idx < count; idx++) {
+            const slot = slotsRef.current[idx];
+            if (!slot || !slot.code) continue;
+            const expectedSymbol = slot.code.split('_')[0]?.trim();
+            const expectedTf = slot.code.split('_')[1]?.trim();
+
+            const isSymbolMatch = symbol === expectedSymbol || symbol.replace(/\.ca$/i, '') === expectedSymbol?.replace(/\.ca$/i, '');
+            const isTfMatch = timeframe === expectedTf || String(parseInt(timeframe, 10)) === String(parseInt(expectedTf, 10));
+
+            if (isSymbolMatch && isTfMatch) {
+              const targetRef = chartRefs[idx];
+              if (targetRef && targetRef.current) {
+                targetRef.current.updateLiveCsv(parts, idx === activeSlotIndexRef.current);
+              }
+            }
+          }
         });
 
-        socket.on('connect_error', () => {
-          setWsStatus('cloud');
+        // 2. Listen for sub-second tick 'price' events
+        socket.on('price', (arg1, arg2) => {
+          let sym = typeof arg1 === 'string' ? arg1 : (arg1?.symbol || arg1?.code || '');
+          let priceVal = arg2 !== undefined ? arg2 : (typeof arg1 === 'object' ? (arg1?.price || arg1?.lastPrice) : undefined);
+
+          if (!sym || priceVal === undefined) return;
+          sym = String(sym).trim();
+
+          const count = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
+
+          for (let idx = 0; idx < count; idx++) {
+            const slot = slotsRef.current[idx];
+            if (!slot || !slot.code) continue;
+            const expectedSymbol = slot.code.split('_')[0]?.trim();
+
+            const isSymbolMatch = sym === expectedSymbol || sym.replace(/\.ca$/i, '') === expectedSymbol?.replace(/\.ca$/i, '');
+
+            if (isSymbolMatch) {
+              const targetRef = chartRefs[idx];
+              if (targetRef && targetRef.current) {
+                targetRef.current.updateLiveTickPrice(priceVal, idx === activeSlotIndexRef.current);
+              }
+            }
+          }
         });
 
         socket.on('upstream_status', (status) => {
-          if (status.connected) setWsStatus('live');
-          else if (status.reconnecting) setWsStatus('reconnecting');
-          else setWsStatus('cloud');
+          if (status.connected) {
+            setWsStatus('live');
+          } else if (status.reconnecting) {
+            setWsStatus('reconnecting');
+          } else {
+            setWsStatus('cloud');
+          }
         });
 
         socket.on('token_refreshed', () => {
           fetchTokenInfo();
         });
 
-        // Full CSV Candle Stream (Zero React Re-render)
-        socket.on('data', (csvPayload) => {
-          if (typeof csvPayload !== 'string') return;
-          const parts = csvPayload.split(',');
-          if (parts.length < 13) return;
-
-          if (chartRef.current) {
-            chartRef.current.updateLiveCsv(parts);
-          }
-
-          const ksiText = parts[46]?.trim();
-          const kcxText = parts[41]?.trim();
-          if (ksiText) setKsiLabelText((prev) => (prev !== `${ksiText} (KSI)` ? `${ksiText} (KSI)` : prev));
-          if (kcxText) setKcxLabelText((prev) => (prev !== `${kcxText} (KCX)` ? `${kcxText} (KCX)` : prev));
+        socket.on('connect_error', () => {
+          setWsStatus('cloud');
         });
 
-        // Sub-second Live Tick Price (Zero React Re-render)
-        socket.on('price', (symbol, priceStr) => {
-          const expectedSymbol = currentCodeRef.current?.split('_')[0];
-          if (symbol !== expectedSymbol) return;
-
-          if (chartRef.current) {
-            chartRef.current.updateLiveTickPrice(priceStr);
-          }
+        socket.on('disconnect', () => {
+          setWsStatus('disconnected');
         });
       } catch (e) {
         setWsStatus('cloud');
@@ -239,36 +660,45 @@ export default function TerminalPage() {
       setWsStatus('cloud');
     }
 
-    // High-performance Live Polling Fallback when WebSocket is not active (e.g. on Vercel)
+    // Live Polling Fallback (when socket is offline / cloud mode)
     const pollInterval = setInterval(() => {
-      if (currentCodeRef.current && (!socket || !socket.connected)) {
-        fetchCandles(currentCodeRef.current, true);
+      if (!socket || !socket.connected) {
+        const visibleCount = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
+        for (let i = 0; i < visibleCount; i++) {
+          const slot = slotsRef.current[i];
+          if (slot && slot.code) {
+            fetchCandlesForSlot(i, slot.code, true);
+          }
+        }
       }
     }, 4000);
 
     return () => {
       clearInterval(pollInterval);
       if (socket) {
-        if (currentCodeRef.current) {
-          socket.emit('unsubscribe', currentCodeRef.current);
-          socket.emit('unsubscribe', 'price');
-        }
         socket.removeAllListeners();
         socket.disconnect();
       }
     };
-  }, [currentCode, fetchCandles, fetchTokenInfo]);
+  }, [fetchCandlesForSlot, fetchTokenInfo, subscribeVisibleSlots]);
 
-  // Initial Load On Page Access (Only verifies Token, DOES NOT call candle API until an asset is clicked)
+  // Re-subscribe visible slots whenever layout or slot codes change
+  useEffect(() => {
+    subscribeVisibleSlots();
+  }, [slots, activeLayout, subscribeVisibleSlots]);
+
+  // Initial Load On Page Access
   useEffect(() => {
     fetchTokenInfo();
-
     const tokenInterval = setInterval(fetchTokenInfo, 15000);
     return () => clearInterval(tokenInterval);
   }, [fetchTokenInfo]);
 
+  // Determine how many slots to display based on layout
+  const visibleSlotCount = activeLayout === '1' ? 1 : (activeLayout.startsWith('2') ? 2 : (activeLayout.startsWith('3') ? 3 : 4));
+
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0b0e14' }}>
       {/* Top Navigation Header */}
       <Header
         currentCode={currentCode}
@@ -281,9 +711,24 @@ export default function TerminalPage() {
         onOpenTokenModal={() => setIsTokenModalOpen(true)}
         isRefreshing={isRefreshing}
         onRefresh={() => {
-          if (currentCode) fetchCandles(currentCode, false, false);
-          else setIsAssetSelectorOpen(true);
+          if (currentCode) {
+            for (let i = 0; i < visibleSlotCount; i++) {
+              if (slots[i]?.code) fetchCandlesForSlot(i, slots[i].code, false, false);
+            }
+          } else {
+            setIsAssetSelectorOpen(true);
+          }
         }}
+        activeLayout={activeLayout}
+        onSelectLayout={handleSelectLayout}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={handleToggleFullscreen}
+        isAutoSave={isAutoSave}
+        onToggleAutoSave={handleToggleAutoSave}
+        saveStatus={saveStatus}
+        lastSavedTime={lastSavedTime}
+        onSaveNow={handleSaveNow}
+        onResetLayout={handleResetLayout}
       />
 
       {/* Notification Banner */}
@@ -294,26 +739,163 @@ export default function TerminalPage() {
         </div>
       )}
 
-      {/* Main Interactive Chart Viewport */}
-      <ChartContainer
-        ref={chartRef}
-        currentCode={currentCode}
-        activeSymbolObj={activeSymbolObj}
-        ksiLabelText={ksiLabelText}
-        kcxLabelText={kcxLabelText}
-        onOpenAssetSelector={() => setIsAssetSelectorOpen(true)}
-      />
+      {/* Main Terminal Viewport (Left Drawing Panel + Multi-Chart Area) */}
+      <div className="terminal-main-content">
+        {/* TradingView Left Vertical Drawing Panel */}
+        <LeftDrawingPanel
+          activeTool={activeDrawingTool}
+          onSelectTool={(tool) => setActiveDrawingTool(tool)}
+          isDrawingsHidden={isDrawingsHidden}
+          onToggleHideDrawings={() => setIsDrawingsHidden((prev) => !prev)}
+          isDrawingsLocked={isDrawingsLocked}
+          onToggleLockDrawings={() => setIsDrawingsLocked((prev) => !prev)}
+          onUndo={() => {
+            const activeRef = chartRefs[activeSlotIndex];
+            if (activeRef?.current?.undoDrawings) {
+              activeRef.current.undoDrawings();
+            }
+          }}
+          onRedo={() => {
+            const activeRef = chartRefs[activeSlotIndex];
+            if (activeRef?.current?.redoDrawings) {
+              activeRef.current.redoDrawings();
+            }
+          }}
+          onClearAllDrawings={() => {
+            const activeRef = chartRefs[activeSlotIndex];
+            if (activeRef?.current?.clearAllDrawings) {
+              activeRef.current.clearAllDrawings();
+            }
+          }}
+          hasDrawings={true}
+        />
+
+        {/* Multi-Chart Grid Viewport */}
+        <div className={`multi-chart-wrapper layout-${activeLayout}`}>
+          {Array.from({ length: visibleSlotCount }).map((_, index) => {
+            const slot = slots[index] || {};
+            const isSlotActive = index === activeSlotIndex;
+            const slotSymbolObj = slot.symbolObj || (slot.code ? getSymbolByCode(slot.code.split('_')[0]) : null) || activeSymbolObj;
+            const availableTfs = slotSymbolObj?.timeframes || [];
+
+            return (
+              <div
+                key={index}
+                className={`chart-slot-wrapper ${isSlotActive && activeLayout !== '1' ? 'active-slot' : ''}`}
+                onClick={() => handleSelectSlot(index)}
+                onMouseDown={() => handleSelectSlot(index)}
+              >
+                {/* Compact Slot Header (Shown when layout is multi-chart) */}
+                {activeLayout !== '1' && (
+                  <div className="chart-slot-header">
+                    <div className="slot-left-info">
+                      <button
+                        className="slot-symbol-badge-btn"
+                        title={`Click để đổi mã tài sản cho Khung #${index + 1}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectSlot(index);
+                          setIsAssetSelectorOpen(true);
+                        }}
+                      >
+                        {slotSymbolObj?.image && (
+                          <img
+                            src={slotSymbolObj.image.split(';')[0]}
+                            alt={slotSymbolObj.name}
+                            className="slot-symbol-img"
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                          />
+                        )}
+                        <span className="slot-symbol-name">{slotSymbolObj?.name || 'CHỌN MÃ'}</span>
+                        <span className="slot-symbol-tf">· {slot.tfName || '5m'}</span>
+                        <span className="slot-symbol-arrow">▾</span>
+                      </button>
+                      {isSlotActive && <span className="slot-active-tag">ĐANG CHỌN</span>}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {availableTfs.length > 0 && (
+                        <div className="slot-tf-group">
+                          {availableTfs.map((tf) => (
+                            <button
+                              key={tf.code}
+                              className={`slot-tf-btn ${slot.code === tf.code ? 'active' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSlotChangeTimeframe(index, tf);
+                              }}
+                            >
+                              {tf.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <button
+                        className="slot-action-btn"
+                        title="Mở toàn khung biểu đồ này"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectSlot(index);
+                          setActiveLayout('1');
+                        }}
+                      >
+                        🗖
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Chart Component for this Slot */}
+                <ChartContainer
+                  ref={chartRefs[index]}
+                  slotIndex={index}
+                  isSlotActive={isSlotActive}
+                  onSelectSlot={() => handleSelectSlot(index)}
+                  currentCode={slot.code || (index === 0 ? currentCode : null)}
+                  activeSymbolObj={slotSymbolObj}
+                  timeframeMinutes={slot.tfMinutes || (index === 0 ? timeframeMinutes : 5)}
+                  ksiLabelText={ksiLabelText}
+                  kcxLabelText={kcxLabelText}
+                  onOpenAssetSelector={() => {
+                    handleSelectSlot(index);
+                    setIsAssetSelectorOpen(true);
+                  }}
+                  activeTimezone={activeTimezone}
+                  onOpenTimezoneModal={() => setIsTimezoneModalOpen(true)}
+                  hideStandbyOverlay={index > 0 && !!currentCode}
+                  activeDrawingTool={index === activeSlotIndex ? activeDrawingTool : DRAWING_TOOLS.CROSSHAIR}
+                  onToolCompleted={() => setActiveDrawingTool(DRAWING_TOOLS.CROSSHAIR)}
+                  isDrawingsHidden={isDrawingsHidden}
+                  isDrawingsLocked={isDrawingsLocked}
+                  onSyncDrawings={handleSyncDrawings}
+                  onSyncCrosshair={handleSyncCrosshair}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Asset Selector Watchlist Modal */}
       <AssetSelector
         isOpen={isAssetSelectorOpen}
         onClose={() => {
-          // Allow closing if an asset is already selected
           if (currentCode) setIsAssetSelectorOpen(false);
         }}
-        currentSymbolCode={activeSymbolObj?.code}
-        currentTimeframeCode={currentCode}
+        currentSymbolCode={slots[activeSlotIndex]?.symbolObj?.code || activeSymbolObj?.code}
+        currentTimeframeCode={slots[activeSlotIndex]?.code || currentCode}
+        targetSlotIndex={activeSlotIndex}
+        activeLayout={activeLayout}
         onSelectAsset={handleSelectAsset}
+      />
+
+      {/* Timezone Switcher Modal */}
+      <TimezoneModal
+        isOpen={isTimezoneModalOpen}
+        onClose={() => setIsTimezoneModalOpen(false)}
+        activeTimezone={activeTimezone}
+        onSelectTimezone={handleSelectTimezone}
       />
 
       {/* Token & Auto-Refresh Modal */}
@@ -323,7 +905,11 @@ export default function TerminalPage() {
         tokenInfo={tokenInfo}
         onRefreshTokenSuccess={() => {
           fetchTokenInfo();
-          if (currentCode) fetchCandles(currentCode, false, false);
+          if (currentCode) {
+            for (let i = 0; i < visibleSlotCount; i++) {
+              if (slots[i]?.code) fetchCandlesForSlot(i, slots[i].code, false, false);
+            }
+          }
         }}
       />
     </div>

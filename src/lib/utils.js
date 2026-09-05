@@ -1,5 +1,9 @@
+// Crazii broker server operates in UTC+3 (MetaTrader server time).
+// When parsing date string formatted as "YYYY.MM.DD HH:mm", we convert from UTC+3 to true UTC timestamp.
+const CRAZII_SERVER_OFFSET_SECONDS = 3 * 3600;
+
 /**
- * Parse timestamp to Unix timestamp in seconds
+ * Parse timestamp to Unix timestamp in seconds (True UTC)
  */
 export function parseTimestampToSeconds(ts) {
   if (typeof ts === 'number') {
@@ -14,7 +18,8 @@ export function parseTimestampToSeconds(ts) {
       if (datePart.length === 3 && timePart.length >= 2) {
         const [y, m, d] = datePart;
         const hh = timePart[0] || 0, mm = timePart[1] || 0, ss = timePart[2] || 0;
-        return Math.floor(Date.UTC(y, m - 1, d, hh, mm, ss) / 1000);
+        // String timestamp is Crazii broker time (UTC+3) -> subtract 3 hours to get true UTC
+        return Math.floor(Date.UTC(y, m - 1, d, hh, mm, ss) / 1000) - CRAZII_SERVER_OFFSET_SECONDS;
       }
     }
     const parsed = Date.parse(trimmed);
