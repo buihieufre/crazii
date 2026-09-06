@@ -162,6 +162,15 @@ export default function RightWatchlistSidebar({
 
   return (
     <div className={`tv-right-sidebar-container ${isOpen ? 'expanded' : 'collapsed'}`}>
+      {/* Mobile Backdrop Overlay */}
+      {isOpen && (
+        <div
+          className="tv-watchlist-backdrop"
+          onClick={onToggleOpen}
+          title="Chạm để đóng Market Watch"
+        />
+      )}
+
       {/* 1. EXPANDED WATCHLIST DRAWER PANEL */}
       {isOpen && (
         <aside
@@ -314,6 +323,9 @@ export default function RightWatchlistSidebar({
                   onClick={() => {
                     const defaultTf = availableTfs[0] || { code: `${sym.code}_5`, name: '5m', minutes: 5 };
                     onSelectAsset(sym.code, defaultTf.code, defaultTf.name, defaultTf.minutes);
+                    if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+                      onToggleOpen();
+                    }
                   }}
                   title={`Click để tải ${sym.name} vào Khung #${targetSlotIndex + 1}`}
                 >
@@ -368,6 +380,9 @@ export default function RightWatchlistSidebar({
                             onClick={(e) => {
                               e.stopPropagation();
                               onSelectAsset(sym.code, tf.code, tf.name, tf.minutes);
+                              if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+                                onToggleOpen();
+                              }
                             }}
                             title={`Tải khung ${tf.name}`}
                           >
@@ -1077,6 +1092,87 @@ export default function RightWatchlistSidebar({
           background: #2962FF;
           color: #ffffff;
           border-color: #2962FF;
+        }
+
+        /* 3. Mobile Backdrop & Drawer Responsive Mode */
+        .tv-watchlist-backdrop {
+          display: none;
+        }
+
+        @keyframes fadeInBackdrop {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes slideInDrawer {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+
+        @media (max-width: 768px) {
+          .tv-watchlist-backdrop {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.72);
+            backdrop-filter: blur(3px);
+            z-index: 1200;
+            animation: fadeInBackdrop 0.2s ease-out;
+          }
+
+          .tv-right-sidebar-container {
+            position: relative;
+            z-index: 40;
+          }
+
+          .tv-right-sidebar-container.expanded .tv-watchlist-drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: min(88vw, 360px) !important;
+            max-width: 100vw;
+            z-index: 1250;
+            box-shadow: -10px 0 35px rgba(0, 0, 0, 0.9);
+            animation: slideInDrawer 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            border-left: 1px solid #2e374d;
+          }
+
+          .tv-right-toolbar-strip {
+            width: 36px;
+            padding: 4px 0;
+            gap: 6px;
+          }
+
+          .right-strip-btn {
+            width: 30px;
+            height: 42px;
+          }
+
+          .strip-btn-label {
+            font-size: 7.5px;
+          }
+
+          .right-strip-slot-badge {
+            width: 28px;
+            padding: 3px 1px;
+          }
+
+          .right-strip-toggle-arrow {
+            width: 28px;
+            height: 26px;
+          }
+
+          .watchlist-drawer-header {
+            padding: 10px 12px 8px;
+          }
+
+          .watchlist-item-row {
+            padding: 10px 12px;
+          }
         }
       `}</style>
     </div>

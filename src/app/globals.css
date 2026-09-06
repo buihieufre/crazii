@@ -1715,25 +1715,38 @@ header {
     padding: 3px 6px;
     min-height: 36px;
     gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  header::-webkit-scrollbar {
+    display: none;
   }
 
   .brand-section {
     gap: 4px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
   .brand-logo {
     font-size: 13px;
+    white-space: nowrap;
   }
 
   .symbol-pill {
-    padding: 2px 5px;
-    font-size: 10px;
+    padding: 2px 6px;
+    font-size: 11px;
+    white-space: nowrap;
+    border-color: rgba(0, 229, 255, 0.4);
+    background: rgba(0, 229, 255, 0.1);
   }
 
   .tf-group {
     padding: 1px;
     gap: 1px;
+    white-space: nowrap;
   }
 
   .tf-btn {
@@ -1756,21 +1769,35 @@ header {
 
   .controls-section {
     gap: 3px;
+    flex-shrink: 0;
   }
 
   .btn {
     padding: 2px 6px;
     font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .terminal-main-content {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .multi-chart-grid {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 1 100% !important;
   }
 
   .tv-left-drawing-panel {
-    width: 32px;
+    width: 30px;
     padding: 4px 0;
   }
 
   .tv-left-tool-btn {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
   }
 
   .subpane-header-bar {
@@ -1810,8 +1837,8 @@ header {
   }
 
   .watermark-center {
-    font-size: 36px;
-    letter-spacing: 4px;
+    font-size: 28px;
+    letter-spacing: 3px;
   }
 }
 

@@ -78,12 +78,17 @@ export default function TerminalPage() {
   const [ksiLabelText, setKsiLabelText] = useState('BOYS BUYING (KSI)');
   const [kcxLabelText, setKcxLabelText] = useState('BEARISHNESS (KCX)');
 
-  // Load right sidebar state from localStorage on mount
+  // Load right sidebar state from localStorage on mount (defaults to false on mobile)
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('tradewh_right_sidebar_open');
-      if (saved !== null) {
-        setIsRightSidebarOpen(saved === 'true');
+      const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+      if (isMobile) {
+        setIsRightSidebarOpen(false);
+      } else {
+        const saved = localStorage.getItem('tradewh_right_sidebar_open');
+        if (saved !== null) {
+          setIsRightSidebarOpen(saved === 'true');
+        }
       }
     } catch (e) {}
   }, []);
@@ -691,6 +696,11 @@ export default function TerminalPage() {
     setTimeframeLabel(tfName);
     setTimeframeMinutes(tfMinutes);
     setIsAssetSelectorOpen(false);
+
+    // Auto-close Market Watch / Right Sidebar on mobile so it doesn't cover chart
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+      setIsRightSidebarOpen(false);
+    }
 
     // Fetch candles for targeted slot
     renderedCodesRef.current[targetSlotIndex] = tfCode;
