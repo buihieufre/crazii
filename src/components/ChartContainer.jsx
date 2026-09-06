@@ -413,6 +413,7 @@ const ChartContainer = forwardRef(function ChartContainer(
   const leftBadgesContainerRef = useRef(null);
 
   const latestCandleRef = useRef(null);
+  const lastCandleTimeRef = useRef(0);
   const currentCodeRef = useRef(currentCode);
   currentCodeRef.current = currentCode;
 
@@ -951,10 +952,59 @@ const ChartContainer = forwardRef(function ChartContainer(
     }
   }, [activeTimezone]);
 
+  const needsAutoFitRef = useRef(true);
+
   // Reset forming candle and markers when symbol changes
   useEffect(() => {
+    needsAutoFitRef.current = true;
     latestCandleRef.current = null;
+    lastCandleTimeRef.current = 0;
     rawCandleMapRef.current.clear();
+
+    // Reset priceScale autoScale and formatting immediately for new asset
+    if (candleSeriesRef.current) {
+      try {
+        const dec = activeSymbolObj?.decimals !== undefined ? activeSymbolObj.decimals : 2;
+        candleSeriesRef.current.applyOptions({
+          priceFormat: {
+            type: 'price',
+            precision: dec,
+            minMove: 1 / Math.pow(10, dec),
+          },
+        });
+        candleSeriesRef.current.priceScale().applyOptions({
+          autoScale: true,
+          scaleMargins: {
+            top: 0.08,
+            bottom: 0.08,
+          },
+        });
+      } catch (e) {}
+    }
+    if (chartRef.current) {
+      try {
+        const panes = chartRef.current.panes?.();
+        if (panes && panes.length > 0) {
+          panes[0].priceScale('right').applyOptions({
+            autoScale: true,
+            scaleMargins: { top: 0.08, bottom: 0.08 },
+          });
+        }
+        chartRef.current.priceScale('right').applyOptions({
+          autoScale: true,
+          scaleMargins: {
+            top: 0.08,
+            bottom: 0.08,
+          },
+        });
+      } catch (e) {}
+    }
+    if (ksiSeriesRef.current) {
+      try { ksiSeriesRef.current.priceScale().applyOptions({ autoScale: true }); } catch (e) {}
+    }
+    if (kcxSeriesRef.current) {
+      try { kcxSeriesRef.current.priceScale().applyOptions({ autoScale: true }); } catch (e) {}
+    }
     if (diamondSignalsPrimitiveRef.current) {
       diamondSignalsPrimitiveRef.current.setSignals([]);
     }
@@ -966,10 +1016,31 @@ const ChartContainer = forwardRef(function ChartContainer(
     });
     activePriceLinesMapRef.current.clear();
     if (leftBadgesContainerRef.current) leftBadgesContainerRef.current.innerHTML = '';
-  }, [currentCode]);
+  }, [currentCode, activeSymbolObj]);
 
   // Expose API for real-time updates and dataset loading
   useImperativeHandle(ref, () => ({
+    fitContent() {
+      if (chartRef.current) {
+        try {
+          if (candleSeriesRef.current) {
+            candleSeriesRef.current.priceScale().applyOptions({
+              autoScale: true,
+              scaleMargins: { top: 0.08, bottom: 0.08 },
+            });
+          }
+          const panes = chartRef.current.panes?.();
+          if (panes && panes.length > 0) {
+            panes[0].priceScale('right').applyOptions({
+              autoScale: true,
+              scaleMargins: { top: 0.08, bottom: 0.08 },
+            });
+          }
+          chartRef.current.timeScale().fitContent();
+          chartRef.current.timeScale().scrollToRealtime();
+        } catch (e) {}
+      }
+    },
     clearAllDrawings() {
       saveDrawingsWithHistory([]);
       setSelectedDrawingId(null);
@@ -1037,7 +1108,14 @@ const ChartContainer = forwardRef(function ChartContainer(
       if (!Array.isArray(dataArray) || dataArray.length === 0) return;
       if (!candleSeriesRef.current) return;
 
+      // 1. Reset and clear previous asset price lines to avoid price scale distortion
+      activePriceLinesMapRef.current.forEach((line) => {
+        try { candleSeriesRef.current?.removePriceLine(line); } catch (e) {}
+      });
+      activePriceLinesMapRef.current.clear();
+      if (leftBadgesContainerRef.current) leftBadgesContainerRef.current.innerHTML = '';
       rawCandleMapRef.current.clear();
+
       const candleData = [];
       const ksiData = [];
       const kcxData = [];
@@ -1179,7 +1257,19 @@ const ChartContainer = forwardRef(function ChartContainer(
 
       cachedCandlesRef.current = candleData;
 
-      if (candleSeriesRef.current) candleSeriesRef.current.setData(candleData);
+      if (candleSeriesRef.current) {
+        const dec = activeSymbolObj?.decimals !== undefined ? activeSymbolObj.decimals : (decimalsRef.current || 2);
+        try {
+          candleSeriesRef.current.applyOptions({
+            priceFormat: {
+              type: 'price',
+              precision: dec,
+              minMove: 1 / Math.pow(10, dec),
+            },
+          });
+        } catch (e) {}
+        candleSeriesRef.current.setData(candleData);
+      }
       if (ksiSeriesRef.current) ksiSeriesRef.current.setData(ksiData);
       if (kcxSeriesRef.current) kcxSeriesRef.current.setData(kcxData);
 
@@ -1196,6 +1286,7 @@ const ChartContainer = forwardRef(function ChartContainer(
         renderPriceLines(lastItem);
 
         const lastTime = parseTimestampToSeconds(lastItem.timestamp || lastItem.time);
+        lastCandleTimeRef.current = lastTime || 0;
         const twbOpen = parseFloat(lastItem.twb_open);
         const twbClose = parseFloat(lastItem.twb_close);
         const open = parseFloat(lastItem.open);
@@ -1221,9 +1312,57 @@ const ChartContainer = forwardRef(function ChartContainer(
         }
       }
 
-      // ONLY fitContent on initial load/switch, NEVER on background polling
-      if (isInitial && chartRef.current) {
-        chartRef.current.timeScale().fitContent();
+      // AUTO-FIT ON INITIAL LOAD OR ASSET SWITCH
+      const shouldAutoFit = isInitial || needsAutoFitRef.current;
+      if (shouldAutoFit && chartRef.current) {
+        needsAutoFitRef.current = false;
+        try {
+          if (candleSeriesRef.current) {
+            candleSeriesRef.current.priceScale().applyOptions({
+              autoScale: true,
+              scaleMargins: {
+                top: 0.08,
+                bottom: 0.08,
+              },
+            });
+          }
+          const panes = chartRef.current.panes?.();
+          if (panes && panes.length > 0) {
+            panes[0].priceScale('right').applyOptions({
+              autoScale: true,
+              scaleMargins: { top: 0.08, bottom: 0.08 },
+            });
+            if (panes.length > 1) {
+              panes[1].priceScale('right').applyOptions({
+                autoScale: true,
+                scaleMargins: { top: 0.12, bottom: 0.05 },
+              });
+            }
+            if (panes.length > 2) {
+              panes[2].priceScale('right').applyOptions({
+                autoScale: true,
+                scaleMargins: { top: 0.08, bottom: 0.08 },
+              });
+            }
+          }
+          if (chartRef.current) {
+            chartRef.current.priceScale('right').applyOptions({
+              autoScale: true,
+              scaleMargins: {
+                top: 0.08,
+                bottom: 0.08,
+              },
+            });
+          }
+          if (ksiSeriesRef.current) {
+            ksiSeriesRef.current.priceScale().applyOptions({ autoScale: true });
+          }
+          if (kcxSeriesRef.current) {
+            kcxSeriesRef.current.priceScale().applyOptions({ autoScale: true });
+          }
+          chartRef.current.timeScale().fitContent();
+          chartRef.current.timeScale().scrollToRealtime();
+        } catch (e) {}
       }
 
       requestAnimationFrame(() => {
@@ -1232,7 +1371,38 @@ const ChartContainer = forwardRef(function ChartContainer(
         updatePaneHeaderPositions();
         applySolidPaneStyles(chartRef.current?.panes());
         redrawDrawings();
+        if (shouldAutoFit && chartRef.current) {
+          try {
+            if (candleSeriesRef.current) {
+              candleSeriesRef.current.priceScale().applyOptions({ autoScale: true });
+            }
+            const panes = chartRef.current.panes?.();
+            if (panes && panes.length > 0) {
+              panes[0].priceScale('right').applyOptions({ autoScale: true });
+            }
+            chartRef.current.timeScale().fitContent();
+            chartRef.current.timeScale().scrollToRealtime();
+          } catch (e) {}
+        }
       });
+
+      if (shouldAutoFit) {
+        setTimeout(() => {
+          if (chartRef.current) {
+            try {
+              if (candleSeriesRef.current) {
+                candleSeriesRef.current.priceScale().applyOptions({ autoScale: true });
+              }
+              const panes = chartRef.current.panes?.();
+              if (panes && panes.length > 0) {
+                panes[0].priceScale('right').applyOptions({ autoScale: true });
+              }
+              chartRef.current.timeScale().fitContent();
+              chartRef.current.timeScale().scrollToRealtime();
+            } catch (e) {}
+          }
+        }, 50);
+      }
     },
 
     updateLiveCsv(data, isSlotActive = true) {
@@ -1263,6 +1433,14 @@ const ChartContainer = forwardRef(function ChartContainer(
 
       if (isSymbolMatch && isTfMatch) {
         const time = parseTimestampToSeconds(timestampStr);
+        if (!time || isNaN(time)) return;
+
+        // Prevent updating series with timestamps older than the latest rendered bar
+        if (lastCandleTimeRef.current && time < lastCandleTimeRef.current) {
+          return;
+        }
+        lastCandleTimeRef.current = Math.max(lastCandleTimeRef.current || 0, time);
+
         const candleColor = twbClose >= twbOpen ? BULLISH_COLOR : BEARISH_COLOR;
 
         const liveCandle = {
@@ -1316,10 +1494,18 @@ const ChartContainer = forwardRef(function ChartContainer(
             ksiVal = ksiRed;
             ksiColor = '#FF3B30';
           }
-          if (ksiSeriesRef.current) ksiSeriesRef.current.update({ time, value: ksiVal, color: ksiColor });
+          if (ksiSeriesRef.current) {
+            try {
+              ksiSeriesRef.current.update({ time, value: ksiVal, color: ksiColor });
+            } catch (e) {}
+          }
 
           const kcxVal = parseFloat(parts[40]);
-          if (kcxSeriesRef.current) kcxSeriesRef.current.update({ time, value: isNaN(kcxVal) ? 0 : kcxVal, color: '#00BFFF' });
+          if (kcxSeriesRef.current) {
+            try {
+              kcxSeriesRef.current.update({ time, value: isNaN(kcxVal) ? 0 : kcxVal, color: '#00BFFF' });
+            } catch (e) {}
+          }
 
           const kcxSym = parts.length > 15 ? parts[15] : '0';
           const liveBlinkBack = parts.length > 43 ? parseInt(parts[43], 10) : NaN;
@@ -1799,9 +1985,9 @@ const ChartContainer = forwardRef(function ChartContainer(
   return (
     <div id="chart-wrapper" onMouseMove={handleWrapperMouseMove} onMouseDown={onSelectSlot}>
       {/* Watermarks */}
-      <div className="watermark-top-right">CRAZII<span>.COM</span></div>
-      <div className="watermark-center">CRAZII</div>
-      <div className="watermark-bottom-left">CRAZII<span>.COM</span></div>
+      <div className="watermark-top-right">TRADEWH<span>.COM</span></div>
+      <div className="watermark-center">TRADEWH</div>
+      <div className="watermark-bottom-left">TRADEWH<span>.COM</span></div>
 
       {/* Standby / Idle State Overlay */}
       {!currentCode && !hideStandbyOverlay && (
@@ -1822,11 +2008,11 @@ const ChartContainer = forwardRef(function ChartContainer(
           }}
         >
           <div style={{ fontSize: 42 }}>📊</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#FFB300', letterSpacing: 0.5 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#CBB193', letterSpacing: 0.5 }}>
             CHỌN TÀI SẢN ĐỂ BẮT ĐẦU STREAMING
           </div>
           <p style={{ maxWidth: 500, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            Biểu đồ đang ở trạng thái <strong>Standby (Đứng yên)</strong> để tránh xung đột kết nối với phiên giao dịch Crazii trên trình duyệt chính. Chọn tài sản bên dưới để bắt đầu kết nối.
+            Biểu đồ đang ở trạng thái <strong>Standby (Đứng yên)</strong>. Chọn tài sản bên dưới hoặc Watchlist để bắt đầu kết nối trực tiếp.
           </p>
           <button
             className="btn btn-primary"

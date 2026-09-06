@@ -40,12 +40,16 @@ export default function Header({
   onSelectLayout,
   isFullscreen = false,
   onToggleFullscreen,
+  isRightSidebarOpen = true,
+  onToggleRightSidebar,
   isAutoSave = true,
   onToggleAutoSave,
   saveStatus = 'saved', // 'saved' | 'saving' | 'idle'
   lastSavedTime = null,
   onSaveNow,
   onResetLayout,
+  user = null,
+  onLogout,
 }) {
   const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false);
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
@@ -86,7 +90,7 @@ export default function Header({
   } else {
     tokenPillClass += ' expired';
     tokenLabel = '🔑 Token: Hết hạn (Click nhập)';
-    tokenTitle = 'Refresh Token đã hết hạn hoặc chưa cấu hình. Click để dán token mới từ crazii.com';
+    tokenTitle = 'Refresh Token đã hết hạn hoặc chưa cấu hình. Click để dán token mới.';
   }
 
   let wsBadgeClass = 'ws-status-badge';
@@ -114,7 +118,7 @@ export default function Header({
   return (
     <header>
       <div className="brand-section">
-        <div className="brand-logo">CRAZII<span>.COM</span></div>
+        <div className="brand-logo">TRADEWH<span>.COM</span></div>
         
         {/* Symbol Pill with Icon -> click to open Asset Selector */}
         <div
@@ -163,35 +167,6 @@ export default function Header({
           <span className="live-dot" style={{ width: 5, height: 5 }}></span>
           <span>{tokenLabel}</span>
         </div>
-      </div>
-
-      {/* Direct DOM OHLC Bar (Zero React Re-render at 60fps) */}
-      <div className="ohlc-bar">
-        <div className="ohlc-item">
-          <span className="ohlc-lbl">O:</span>
-          <span id="ohlc-val-o" className="ohlc-val">-</span>
-        </div>
-        <div className="ohlc-item">
-          <span className="ohlc-lbl">H:</span>
-          <span id="ohlc-val-h" className="ohlc-val">-</span>
-        </div>
-        <div className="ohlc-item">
-          <span className="ohlc-lbl">L:</span>
-          <span id="ohlc-val-l" className="ohlc-val">-</span>
-        </div>
-        <div className="ohlc-item">
-          <span className="ohlc-lbl">C:</span>
-          <span id="ohlc-val-c" className="ohlc-val">-</span>
-        </div>
-        <div className="ohlc-item">
-          <span className="ohlc-lbl">TWB O:</span>
-          <span id="ohlc-val-twb-o" className="ohlc-val">-</span>
-        </div>
-        <div className="ohlc-item">
-          <span className="ohlc-lbl">TWB C:</span>
-          <span id="ohlc-val-twb-c" className="ohlc-val">-</span>
-        </div>
-        <span id="ohlc-twb-tag" className="twb-tag" style={{ display: 'none' }}>-</span>
       </div>
 
       {/* Controls */}
@@ -377,6 +352,7 @@ export default function Header({
         </Link>
         */}
 
+
         {/* Fullscreen Toggle Button */}
         <button
           className="btn"
@@ -386,6 +362,51 @@ export default function Header({
           <span>{isFullscreen ? '🗗' : '⛶'}</span>
           <span>{isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}</span>
         </button>
+
+        {/* User Profile & Logout Button */}
+        {user && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '4px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '3px 8px 3px 4px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '20px',
+                fontSize: '11px',
+                fontWeight: '600',
+              }}
+              title={user.email}
+            >
+              <img
+                src={user.picture || 'https://lh3.googleusercontent.com/a/default-user'}
+                alt="Avatar"
+                style={{ width: '18px', height: '18px', borderRadius: '50%', objectFit: 'cover' }}
+              />
+              <span style={{ maxWidth: '85px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user.name || user.email?.split('@')[0]}
+              </span>
+            </div>
+
+            <button
+              className="btn"
+              onClick={onLogout}
+              style={{
+                padding: '3px 8px',
+                fontSize: '11px',
+                color: '#ff8a80',
+                borderColor: 'rgba(255, 82, 82, 0.3)',
+                background: 'rgba(255, 82, 82, 0.08)',
+              }}
+              title="Đăng xuất khỏi phiên làm việc"
+            >
+              <span>🚪</span>
+              <span>Đăng xuất</span>
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

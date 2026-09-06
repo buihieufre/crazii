@@ -3,11 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CRAZII.COM | Real-Time Live Streaming Chart Terminal</title>
+  <title>TRADEWH.COM | Real-Time Live Streaming Chart Terminal</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/favicon.svg">
   <!-- TradingView Lightweight Charts CDN -->
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
   <!-- Socket.IO Client CDN -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- Google Identity Services (GIS) SDK -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,6 +28,168 @@
       --accent-yellow: #FFEB3B;
       --accent-red: #FF0000;
       --accent-blue: #2962FF;
+      --accent-green: #00E676;
+      --accent-cyan: #00E5FF;
+      --accent-orange: #FFA726;
+      --accent-magenta: #E040FB;
+    }
+
+    /* Fullscreen Google Sign-In Barrier Overlay */
+    .auth-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: radial-gradient(circle at center, rgba(19, 23, 34, 0.94) 0%, rgba(11, 14, 20, 0.98) 100%);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      transition: opacity 0.3s ease, visibility 0.3s ease;
+    }
+
+    .auth-card {
+      background: #151821;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(255, 179, 0, 0.08);
+      border-radius: 12px;
+      padding: 36px 32px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .auth-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #FFB300, #00E5FF, #00E676, #FFB300);
+      background-size: 300% 100%;
+      animation: shimmer 4s infinite linear;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 300% 0%; }
+    }
+
+    .auth-brand {
+      font-size: 24px;
+      font-weight: 900;
+      color: #CBB193;
+      letter-spacing: 1.5px;
+      margin-bottom: 4px;
+    }
+
+    .auth-brand span {
+      color: #AB978C;
+      font-size: 13px;
+      opacity: 0.9;
+      margin-left: 1px;
+    }
+
+    .auth-tagline {
+      font-size: 12px;
+      font-weight: 600;
+      color: #00E5FF;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 18px;
+    }
+
+    .auth-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    .auth-btn-wrapper {
+      display: flex;
+      justify-content: center;
+      min-height: 48px;
+      margin-bottom: 20px;
+    }
+
+    .auth-footer-note {
+      font-size: 11px;
+      color: #60687a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .auth-alert-box {
+      display: none;
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+
+    .auth-blurred {
+      filter: blur(14px) brightness(0.5);
+      pointer-events: none;
+      user-select: none;
+      transition: filter 0.3s ease;
+    }
+
+    /* User Profile Header Chip & Logout Button */
+    .user-header-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .user-profile-chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      padding: 3px 8px 3px 4px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .user-avatar {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-logout {
+      background: rgba(255, 82, 82, 0.12);
+      color: #ff5252;
+      border-color: rgba(255, 82, 82, 0.3);
+      padding: 3px 8px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+
+    .btn-logout:hover {
+      background: rgba(255, 82, 82, 0.25);
+      border-color: #ff5252;
+      color: #ffffff;
+    }
       --accent-green: #00E676;
       --accent-cyan: #00E5FF;
       --accent-orange: #FFA726;
@@ -68,16 +235,19 @@
     .brand-logo {
       font-weight: 900;
       font-size: 15px;
-      letter-spacing: 1px;
-      color: #FFB300;
+      letter-spacing: 1.2px;
+      color: #CBB193;
       display: flex;
       align-items: baseline;
+      user-select: none;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
     }
 
     .brand-logo span {
       font-size: 10px;
-      color: #ffffff;
-      opacity: 0.8;
+      color: #AB978C;
+      opacity: 0.9;
+      margin-left: 1px;
     }
 
     .symbol-pill {
@@ -352,7 +522,7 @@
     }
 
     /* Watermarks */
-    .watermark-overlay {
+    .watermark-center {
       position: absolute;
       top: 28%;
       left: 50%;
@@ -360,7 +530,7 @@
       font-size: 68px;
       font-weight: 900;
       letter-spacing: 12px;
-      color: rgba(255, 255, 255, 0.035);
+      color: rgba(233, 230, 231, 0.035);
       pointer-events: none;
       user-select: none;
       z-index: 2;
@@ -373,7 +543,7 @@
       font-size: 15px;
       font-weight: 900;
       letter-spacing: 2px;
-      color: rgba(255, 179, 0, 0.5);
+      color: rgba(203, 177, 147, 0.45);
       pointer-events: none;
       z-index: 2;
       display: flex;
@@ -382,7 +552,8 @@
 
     .watermark-top-right span {
       font-size: 10px;
-      color: rgba(255, 255, 255, 0.4);
+      color: rgba(233, 230, 231, 0.4);
+      margin-left: 1px;
     }
 
     .watermark-bottom-left {
@@ -392,14 +563,17 @@
       font-size: 14px;
       font-weight: 800;
       letter-spacing: 1px;
-      color: rgba(255, 179, 0, 0.4);
+      color: rgba(203, 177, 147, 0.4);
       pointer-events: none;
       z-index: 2;
+      display: flex;
+      align-items: baseline;
     }
 
     .watermark-bottom-left span {
       font-size: 9px;
-      color: rgba(255, 255, 255, 0.3);
+      color: rgba(233, 230, 231, 0.35);
+      margin-left: 1px;
     }
 
     /* Exact TradingView Stacked Price & Countdown Badge on Right Scale */
@@ -657,7 +831,7 @@
   <!-- Top Navigation Bar -->
   <header>
     <div class="brand-section">
-      <div class="brand-logo">CRAZII<span>.COM</span></div>
+      <div class="brand-logo">TRADEWH<span>.COM</span></div>
       <div class="symbol-pill">
         <span class="live-dot"></span>
         <span id="symbol-display">XAUUSD.ca_5</span>
@@ -684,17 +858,6 @@
       </div>
     </div>
 
-    <!-- Live Dynamic OHLC Values -->
-    <div class="ohlc-bar" id="ohlc-bar">
-      <div class="ohlc-item"><span class="ohlc-lbl">O:</span><span class="ohlc-val" id="ohlc-o">-</span></div>
-      <div class="ohlc-item"><span class="ohlc-lbl">H:</span><span class="ohlc-val" id="ohlc-h">-</span></div>
-      <div class="ohlc-item"><span class="ohlc-lbl">L:</span><span class="ohlc-val" id="ohlc-l">-</span></div>
-      <div class="ohlc-item"><span class="ohlc-lbl">C:</span><span class="ohlc-val" id="ohlc-c">-</span></div>
-      <div class="ohlc-item"><span class="ohlc-lbl">TWB O:</span><span class="ohlc-val" id="twb-o">-</span></div>
-      <div class="ohlc-item"><span class="ohlc-lbl">TWB C:</span><span class="ohlc-val" id="twb-c">-</span></div>
-      <span id="twb-status" class="twb-tag" style="display: none;"></span>
-    </div>
-
     <!-- Controls -->
     <div class="controls-section">
       <select id="code-select" class="select-symbol" onchange="onSymbolDropdownChange()">
@@ -711,6 +874,18 @@
       <button class="btn" onclick="openTokenModal()">
         <span>🔑 Token</span>
       </button>
+
+      <!-- User Profile & Logout Section (Visible after authentication) -->
+      <div id="user-header-section" class="user-header-section" style="display:none;">
+        <div class="user-profile-chip" id="user-profile-chip" title="Tài khoản Google đã đăng nhập">
+          <img id="user-avatar-img" class="user-avatar" src="https://lh3.googleusercontent.com/a/default-user" alt="User" />
+          <span id="user-name-text" class="user-name">User</span>
+        </div>
+        <button class="btn btn-logout" onclick="handleLogout()" title="Đăng xuất khỏi hệ thống">
+          <span>🚪</span>
+          <span>Logout</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -724,9 +899,9 @@
 
   <!-- Main Chart Viewport -->
   <div id="chart-wrapper">
-    <div class="watermark-top-right">CRAZII<span>.COM</span></div>
-    <div class="watermark-center">CRAZII</div>
-    <div class="watermark-bottom-left">CRAZII<span>.COM</span></div>
+    <div class="watermark-top-right">TRADEWH<span>.COM</span></div>
+    <div class="watermark-center">TRADEWH</div>
+    <div class="watermark-bottom-left">TRADEWH<span>.COM</span></div>
 
     <!-- Exact TradingView Stacked Price & Countdown Scale Badge -->
     <div id="tv-price-scale-badge" class="tv-price-scale-badge">
@@ -774,7 +949,7 @@
   <div class="modal-overlay" id="token-modal">
     <div class="modal-card" style="max-width: 520px;">
       <div class="modal-header">
-        <h3 class="modal-title">🔐 Crazii Authentication & Auto-Refresh</h3>
+        <h3 class="modal-title">🔐 TRADEWH Authentication & Auto-Refresh</h3>
         <button class="btn" onclick="closeTokenModal()">&times;</button>
       </div>
 
@@ -796,13 +971,13 @@
       <!-- Refresh Token Input Form -->
       <div style="margin-bottom: 12px;">
         <label style="font-size: 11px; font-weight: 700; color: #ffffff; display: flex; justify-content: space-between;">
-          <span>🔑 Crazii Refresh Token (Hạn 3 Ngày)</span>
+          <span>🔑 TRADEWH Refresh Token (Hạn 3 Ngày)</span>
           <span style="color: var(--accent-green); font-size: 10px; font-weight: 700;">Khuyên dùng</span>
         </label>
         <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-top: 3px; margin-bottom: 6px;">
-          Dán mã Refresh Token (<code>typ: Refresh</code>) lấy từ crazii.com. Chỉ cần dán 1 lần duy nhất mỗi 3 ngày, server sẽ tự động cấp mới Access Token liên tục để biểu đồ không bao giờ bị dừng.
+          Dán mã Refresh Token (<code>typ: Refresh</code>) lấy từ hệ thống TRADEWH. Chỉ cần dán 1 lần duy nhất mỗi 3 ngày, server sẽ tự động cấp mới Access Token liên tục để biểu đồ không bao giờ bị dừng.
         </p>
-        <input type="text" id="refresh-token-input" class="input-field" style="margin-bottom: 6px;" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IlJlZnJlc2giLC..." />
+        <input type="text" id="refresh-token-input" class="input-field" style="margin-bottom: 6px;" placeholder="Dán mã Refresh Token mới tại đây..." />
       </div>
 
       <div id="token-modal-alert" style="display:none; font-size: 11px; padding: 6px 10px; border-radius: 4px; margin-bottom: 10px;"></div>
@@ -822,7 +997,247 @@
     </div>
   </div>
 
+  <!-- Fullscreen Google Sign-In Barrier Overlay -->
+  <div id="auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="auth-brand">TRADEWH<span>.COM</span></div>
+      <div class="auth-tagline">Real-Time Live Streaming Chart Terminal</div>
+      <p class="auth-desc">
+        Vui lòng đăng nhập bằng tài khoản Google để truy cập vào hệ thống dữ liệu biểu đồ, luồng stream WebSocket và chỉ báo kỹ thuật chuyên sâu.
+      </p>
+
+      <div id="auth-alert-box" class="auth-alert-box"></div>
+
+      <!-- Google Identity Services Sign-In Button Container -->
+      <div class="auth-btn-wrapper">
+        <div id="g_id_signin_container"></div>
+      </div>
+
+      <div class="auth-footer-note">
+        <span>🔒</span>
+        <span>Xác thực bảo mật qua Google OAuth 2.0 & Backend Session</span>
+      </div>
+    </div>
+  </div>
+
   <script>
+    // --- Authentication & Session State ---
+    let currentUser = null;
+    let isAppInitialized = false;
+
+    function getSessionToken() {
+      return localStorage.getItem('crazii_session_token') || '';
+    }
+
+    function setSessionData(token, user) {
+      if (token) localStorage.setItem('crazii_session_token', token);
+      if (user) localStorage.setItem('crazii_user', JSON.stringify(user));
+      currentUser = user;
+    }
+
+    function clearSessionData() {
+      localStorage.removeItem('crazii_session_token');
+      localStorage.removeItem('crazii_user');
+      currentUser = null;
+    }
+
+    /**
+     * =========================================================================
+     * Google Sign-In & Authentication Barrier Functions
+     * =========================================================================
+     */
+    function showLoginOverlay(errorMsg = '') {
+      const overlay = document.getElementById('auth-overlay');
+      const chartWrapper = document.getElementById('chart-wrapper');
+      const headerSection = document.getElementById('user-header-section');
+      const alertBox = document.getElementById('auth-alert-box');
+
+      if (overlay) {
+        overlay.style.display = 'flex';
+        overlay.style.opacity = '1';
+        overlay.style.visibility = 'visible';
+      }
+      if (chartWrapper) chartWrapper.classList.add('auth-blurred');
+      if (headerSection) headerSection.style.display = 'none';
+
+      if (errorMsg && alertBox) {
+        alertBox.style.display = 'block';
+        alertBox.style.background = 'rgba(255, 82, 82, 0.15)';
+        alertBox.style.color = '#ff8a80';
+        alertBox.style.border = '1px solid rgba(255, 82, 82, 0.3)';
+        alertBox.innerHTML = `⚠️ ${errorMsg}`;
+      } else if (alertBox) {
+        alertBox.style.display = 'none';
+      }
+
+      initGoogleIdentityServices();
+    }
+
+    function hideLoginOverlay() {
+      const overlay = document.getElementById('auth-overlay');
+      const chartWrapper = document.getElementById('chart-wrapper');
+      const headerSection = document.getElementById('user-header-section');
+
+      if (overlay) {
+        overlay.style.opacity = '0';
+        overlay.style.visibility = 'hidden';
+        setTimeout(() => { overlay.style.display = 'none'; }, 300);
+      }
+      if (chartWrapper) chartWrapper.classList.remove('auth-blurred');
+      if (headerSection) headerSection.style.display = 'flex';
+
+      updateUserHeaderUI(currentUser);
+    }
+
+    function updateUserHeaderUI(user) {
+      if (!user) return;
+      const avatarImg = document.getElementById('user-avatar-img');
+      const nameText = document.getElementById('user-name-text');
+
+      if (avatarImg) {
+        avatarImg.src = user.picture || 'https://lh3.googleusercontent.com/a/default-user';
+      }
+      if (nameText) {
+        nameText.innerText = user.name || user.email?.split('@')[0] || 'User';
+      }
+    }
+
+    async function checkAuthState() {
+      const token = getSessionToken();
+      if (!token) {
+        showLoginOverlay();
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          currentUser = data.user;
+          hideLoginOverlay();
+          startDashboardSession();
+        } else {
+          clearSessionData();
+          showLoginOverlay('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        }
+      } catch (err) {
+        console.warn('[Auth Check Error]', err.message);
+        showLoginOverlay('Lỗi kiểm tra xác thực. Vui lòng đăng nhập.');
+      }
+    }
+
+    async function initGoogleIdentityServices() {
+      if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) {
+        setTimeout(initGoogleIdentityServices, 300);
+        return;
+      }
+
+      try {
+        let clientId = '';
+        try {
+          const cfgRes = await fetch('/api/auth/config');
+          if (cfgRes.ok) {
+            const cfg = await cfgRes.json();
+            clientId = cfg.clientId;
+          }
+        } catch (e) {}
+
+        if (!clientId) {
+          clientId = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+        }
+
+        google.accounts.id.initialize({
+          client_id: clientId,
+          callback: handleGoogleCredentialResponse,
+          auto_select: false,
+          cancel_on_tap_outside: false
+        });
+
+        const btnContainer = document.getElementById('g_id_signin_container');
+        if (btnContainer) {
+          btnContainer.innerHTML = '';
+          google.accounts.id.renderButton(btnContainer, {
+            theme: 'filled_black',
+            size: 'large',
+            shape: 'pill',
+            width: 280,
+            text: 'signin_with',
+            logo_alignment: 'left'
+          });
+        }
+      } catch (err) {
+        console.error('[GIS Init Error]', err);
+      }
+    }
+
+    async function handleGoogleCredentialResponse(response) {
+      if (!response || !response.credential) {
+        showLoginOverlay('Không nhận được credential từ Google.');
+        return;
+      }
+
+      const alertBox = document.getElementById('auth-alert-box');
+      if (alertBox) {
+        alertBox.style.display = 'block';
+        alertBox.style.background = 'rgba(0, 229, 255, 0.12)';
+        alertBox.style.color = '#00E5FF';
+        alertBox.style.border = '1px solid rgba(0, 229, 255, 0.3)';
+        alertBox.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span> Đang xác thực với Google Backend...';
+      }
+
+      try {
+        const res = await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential: response.credential })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setSessionData(data.sessionToken, data.user);
+          hideLoginOverlay();
+          startDashboardSession();
+        } else {
+          showLoginOverlay(data.message || 'Xác thực Google thất bại.');
+        }
+      } catch (err) {
+        showLoginOverlay(`Lỗi kết nối máy chủ: ${err.message}`);
+      }
+    }
+
+    async function handleLogout() {
+      const token = getSessionToken();
+      if (token) {
+        try {
+          await fetch('/api/auth/logout', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+        } catch (e) {}
+      }
+
+      clearSessionData();
+      if (localSocket) {
+        try { localSocket.close(); } catch (e) {}
+        localSocket = null;
+      }
+      showLoginOverlay('Bạn đã đăng xuất thành công.');
+    }
+
+    function startDashboardSession() {
+      if (!isAppInitialized) {
+        initChart();
+        startBarCountdownTimer();
+        isAppInitialized = true;
+      }
+      initWebSocket();
+      fetchTokenInfo();
+      fetchChartData();
+    }
+
     // --- Application State ---
     let chart = null;
     let candleSeries = null;
@@ -1280,6 +1695,12 @@
       const refreshIcon = document.getElementById('refresh-icon');
       const demoBtn = document.getElementById('demo-mode-btn');
 
+      const token = getSessionToken();
+      if (!token) {
+        showLoginOverlay('Vui lòng đăng nhập bằng Google để tải dữ liệu.');
+        return;
+      }
+
       refreshIcon.innerHTML = '<span class="spinner"></span>';
       refreshBtn.disabled = true;
 
@@ -1289,8 +1710,17 @@
       let url = `/api/candles?code=${encodeURIComponent(currentCode)}`;
 
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
         const result = await response.json();
+
+        if (response.status === 401) {
+          showLoginOverlay('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+          return;
+        }
 
         if (!response.ok) {
           banner.className = 'error';
@@ -1342,11 +1772,20 @@
      * =========================================================================
      */
     function initWebSocket() {
+      const token = getSessionToken();
+      if (!token) return;
+
       if (localSocket) {
         try { localSocket.close(); } catch (e) {}
       }
 
       localSocket = io({
+        auth: {
+          sessionToken: token
+        },
+        query: {
+          sessionToken: token
+        },
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: Infinity,
@@ -1818,8 +2257,13 @@
     let tokenInfoState = null;
 
     async function fetchTokenInfo() {
+      const token = getSessionToken();
+      if (!token) return;
+
       try {
-        const res = await fetch('/api/token-info');
+        const res = await fetch('/api/token-info', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (!res.ok) return;
         const data = await res.json();
         tokenInfoState = data;
@@ -1866,7 +2310,7 @@
       if (info.refreshToken?.hasToken && !info.refreshToken.isExpired) {
         refreshStatus.style.color = '#00E5FF';
         refreshStatus.innerText = `Active (${formatTimeRemaining(refreshLeft)})`;
-        document.getElementById('refresh-token-input').placeholder = `Current: ${info.refreshToken.preview}`;
+        document.getElementById('refresh-token-input').placeholder = 'Dán mã Refresh Token mới tại đây...';
       } else {
         refreshStatus.style.color = '#ff5252';
         refreshStatus.innerText = 'Chưa thiết lập / Hết hạn';
@@ -1916,13 +2360,25 @@
     }
 
     async function triggerManualRefresh() {
+      const token = getSessionToken();
+      if (!token) {
+        showLoginOverlay('Vui lòng đăng nhập để thao tác.');
+        return;
+      }
+
       const btn = document.getElementById('btn-manual-refresh');
       const icon = document.getElementById('manual-refresh-icon');
       btn.disabled = true;
       icon.innerHTML = '<span class="spinner"></span>';
 
       try {
-        const res = await fetch('/api/refresh-token', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const res = await fetch('/api/refresh-token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          }
+        });
         const data = await res.json();
         if (data.success) {
           showTokenAlert('✅ Đã refresh Access Token thành công! Biểu đồ đang tải lại...', 'success');
@@ -1940,12 +2396,18 @@
     }
 
     async function saveRefreshTokenFromModal() {
+      const token = getSessionToken();
+      if (!token) {
+        showLoginOverlay('Vui lòng đăng nhập để thao tác.');
+        return;
+      }
+
       const input = document.getElementById('refresh-token-input');
       const tokenVal = input.value.trim();
       const saveBtn = document.getElementById('btn-save-token');
 
       if (!tokenVal) {
-        showTokenAlert('⚠️ Vui lòng dán mã Refresh Token hợp lệ từ crazii.com', 'error');
+        showTokenAlert('⚠️ Vui lòng dán mã Refresh Token hợp lệ', 'error');
         return;
       }
 
@@ -1955,7 +2417,10 @@
       try {
         const res = await fetch('/api/set-refresh-token', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({ refreshToken: tokenVal })
         });
         const data = await res.json();
@@ -1977,16 +2442,16 @@
       }
     }
 
-    // Auto-initialize on Load
+    // Auto-initialize with Google Authentication check
     window.addEventListener('DOMContentLoaded', () => {
-      initChart();
-      initWebSocket();
-      startBarCountdownTimer();
-      fetchTokenInfo();
-      fetchChartData();
+      checkAuthState();
 
       // Periodic check for token expiration status
-      setInterval(fetchTokenInfo, 10000);
+      setInterval(() => {
+        if (getSessionToken()) {
+          fetchTokenInfo();
+        }
+      }, 10000);
     });
   </script>
 </body>

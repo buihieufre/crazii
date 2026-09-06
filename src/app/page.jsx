@@ -7,17 +7,28 @@ import ChartContainer from '@/components/ChartContainer';
 import LeftDrawingPanel, { DRAWING_TOOLS } from '@/components/LeftDrawingPanel';
 import TokenModal from '@/components/TokenModal';
 import AssetSelector from '@/components/AssetSelector';
+import RightWatchlistSidebar from '@/components/RightWatchlistSidebar';
 import TimezoneModal from '@/components/TimezoneModal';
+import AuthOverlay from '@/components/AuthOverlay';
+import { createClient as createSupabaseClient } from '@/utils/supabase/client';
 import { calculateBarCountdown } from '@/lib/utils';
 import { updateHeaderCountdown } from '@/lib/ohlc-updater';
 import { getSymbolByCode } from '@/lib/assets-data';
 import { getDefaultTimezone } from '@/lib/timezones';
 
 export default function TerminalPage() {
+  // Google & Supabase Sign-In Barrier Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
   // Layout and Multi-Chart State
   const [activeLayout, setActiveLayout] = useState('1'); // '1' | '2-col' | '2-row' | '3-col' | '3-grid' | '4-grid'
   const [activeSlotIndex, setActiveSlotIndex] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Right Watchlist Sidebar State (Always toggleable via right toolbar)
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
 
   // Drawing tools state
   const [activeDrawingTool, setActiveDrawingTool] = useState(DRAWING_TOOLS.CROSSHAIR);
@@ -54,13 +65,33 @@ export default function TerminalPage() {
   const [wsStatus, setWsStatus] = useState('idle'); // 'idle' | 'live' | 'cloud' | 'reconnecting' | 'disconnected'
   const [tokenInfo, setTokenInfo] = useState(null);
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
-  const [isAssetSelectorOpen, setIsAssetSelectorOpen] = useState(true); // Open watchlist on arrival
+  const [isAssetSelectorOpen, setIsAssetSelectorOpen] = useState(false); // Right sidebar is primary
   const [activeTimezone, setActiveTimezone] = useState(getDefaultTimezone);
   const [isTimezoneModalOpen, setIsTimezoneModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notification, setNotification] = useState(null);
   const [ksiLabelText, setKsiLabelText] = useState('BOYS BUYING (KSI)');
   const [kcxLabelText, setKcxLabelText] = useState('BEARISHNESS (KCX)');
+
+  // Load right sidebar state from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('tradewh_right_sidebar_open');
+      if (saved !== null) {
+        setIsRightSidebarOpen(saved === 'true');
+      }
+    } catch (e) {}
+  }, []);
+
+  const handleToggleRightSidebar = useCallback(() => {
+    setIsRightSidebarOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('tradewh_right_sidebar_open', String(next));
+      } catch (e) {}
+      return next;
+    });
+  }, []);
 
   const activeSlotIndexRef = useRef(activeSlotIndex);
   activeSlotIndexRef.current = activeSlotIndex;
@@ -76,6 +107,131 @@ export default function TerminalPage() {
 
   const timeframeMinutesRef = useRef(timeframeMinutes);
   timeframeMinutesRef.current = timeframeMinutes;
+
+  // Session Token Helper
+  const getSessionToken = useCallback(() => {
+    return typeof window !== 'undefined' ? (localStorage.getItem('crazii_session_token') || '') : '';
+  }, []);
+
+  // Logout Handler
+  const handleLogout = useCallback(async () => {
+    const token = getSessionToken();
+    if (token) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {}
+    }
+    try {
+      const supabase = createSupabaseClient();
+      await supabase.auth.signOut();
+    } catch (e) {}
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('crazii_session_token');
+      localStorage.removeItem('crazii_user');
+    }
+    if (socketRef.current) {
+      try {
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+      } catch (e) {}
+      socketRef.current = null;
+    }
+    setCurrentUser(null);
+    setIsAuthenticated(false);
+    setWsStatus('disconnected');
+  }, [getSessionToken]);
+
+  // Initial Auth Check on Mount (Supports Supabase Auth & Local Session)
+  useEffect(() => {
+    async function verifyAuth() {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('crazii_session_token') : null;
+
+      // 1. Try checking Supabase Auth session first
+      try {
+        const supabase = createSupabaseClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const userObj = {
+            sub: session.user.id,
+            email: session.user.email,
+            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0],
+            picture: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null,
+          };
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('crazii_session_token', session.access_token);
+            localStorage.setItem('crazii_user', JSON.stringify(userObj));
+          }
+          setCurrentUser(userObj);
+          setIsAuthenticated(true);
+          setIsCheckingAuth(false);
+          return;
+        }
+      } catch (supaErr) {
+        console.warn('Supabase getSession error:', supaErr);
+      }
+
+      // 2. Fallback to Local Session Token check
+      if (!token) {
+        setIsAuthenticated(false);
+        setIsCheckingAuth(false);
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentUser(data.user);
+          setIsAuthenticated(true);
+        } else {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('crazii_session_token');
+            localStorage.removeItem('crazii_user');
+          }
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+        }
+      } catch (e) {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    }
+
+    verifyAuth();
+
+    // Listen for Supabase Auth state changes
+    try {
+      const supabase = createSupabaseClient();
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+          const userObj = {
+            sub: session.user.id,
+            email: session.user.email,
+            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0],
+            picture: session.user.user_metadata?.avatar_url || null,
+          };
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('crazii_session_token', session.access_token);
+            localStorage.setItem('crazii_user', JSON.stringify(userObj));
+          }
+          setCurrentUser(userObj);
+          setIsAuthenticated(true);
+          setIsCheckingAuth(false);
+        }
+      });
+
+      return () => {
+        subscription?.unsubscribe();
+      };
+    } catch (e) {}
+  }, []);
 
   // Helper to subscribe visible slot codes on active socket connection
   const subscribeVisibleSlots = useCallback(() => {
@@ -124,23 +280,42 @@ export default function TerminalPage() {
 
   // Fetch Token Info from Backend
   const fetchTokenInfo = useCallback(async () => {
+    const token = getSessionToken();
+    if (!token) return;
+
     try {
-      const res = await fetch('/api/token-info');
+      const res = await fetch('/api/token-info', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
       if (!res.ok) return;
       const data = await res.json();
       setTokenInfo(data);
     } catch (e) {
       console.warn('Failed to fetch token info:', e);
     }
-  }, []);
+  }, [getSessionToken, handleLogout]);
 
   // Fetch Historical Candles for a specific Slot
   const fetchCandlesForSlot = useCallback(async (slotIndex, codeToFetch, isSilent = false, isInitial = false) => {
     if (!codeToFetch) return;
+    const token = getSessionToken();
+    if (!token) return;
+
     if (!isSilent) setIsRefreshing(true);
 
     try {
-      const res = await fetch(`/api/candles?code=${encodeURIComponent(codeToFetch)}`);
+      const res = await fetch(`/api/candles?code=${encodeURIComponent(codeToFetch)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
       const contentType = res.headers.get('content-type') || '';
 
       if (!contentType.includes('application/json')) {
@@ -547,8 +722,29 @@ export default function TerminalPage() {
     return () => clearInterval(interval);
   }, [currentCode, timeframeMinutes]);
 
-  // Persistent WebSocket Connection Lifecycle
+  // Handle Login Success from Google
+  const handleLoginSuccess = useCallback((token, user) => {
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+    // Reload visible slots on login
+    const visibleCount = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
+    for (let i = 0; i < visibleCount; i++) {
+      const slot = slotsRef.current[i];
+      const code = slot?.code || (i === 0 ? currentCodeRef.current : null);
+      if (code) {
+        renderedCodesRef.current[i] = code;
+        fetchCandlesForSlot(i, code, i > 0, true);
+      }
+    }
+    fetchTokenInfo();
+  }, [fetchCandlesForSlot, fetchTokenInfo]);
+
+  // Persistent WebSocket Connection Lifecycle (Authenticated Only)
   useEffect(() => {
+    if (!isAuthenticated) return;
+    const token = getSessionToken();
+    if (!token) return;
+
     let socket = null;
     let isVercel = false;
 
@@ -560,6 +756,8 @@ export default function TerminalPage() {
     if (!isVercel) {
       try {
         socket = io(window.location.origin, {
+          auth: { sessionToken: token },
+          query: { sessionToken: token },
           transports: ['websocket', 'polling'],
           reconnection: true,
           reconnectionAttempts: Infinity,
@@ -646,7 +844,8 @@ export default function TerminalPage() {
           fetchTokenInfo();
         });
 
-        socket.on('connect_error', () => {
+        socket.on('connect_error', (err) => {
+          console.warn('[Socket Connection Error]', err?.message);
           setWsStatus('cloud');
         });
 
@@ -680,30 +879,51 @@ export default function TerminalPage() {
         socket.disconnect();
       }
     };
-  }, [fetchCandlesForSlot, fetchTokenInfo, subscribeVisibleSlots]);
+  }, [isAuthenticated, getSessionToken, fetchCandlesForSlot, fetchTokenInfo, subscribeVisibleSlots]);
 
   // Re-subscribe visible slots whenever layout or slot codes change
   useEffect(() => {
-    subscribeVisibleSlots();
-  }, [slots, activeLayout, subscribeVisibleSlots]);
+    if (isAuthenticated) {
+      subscribeVisibleSlots();
+    }
+  }, [isAuthenticated, slots, activeLayout, subscribeVisibleSlots]);
 
-  // Initial Load On Page Access
+  // Initial & Periodic Load On Page Access (Authenticated Only)
   useEffect(() => {
+    if (!isAuthenticated) return;
     fetchTokenInfo();
     const tokenInterval = setInterval(fetchTokenInfo, 15000);
     return () => clearInterval(tokenInterval);
-  }, [fetchTokenInfo]);
+  }, [isAuthenticated, fetchTokenInfo]);
 
   // Determine how many slots to display based on layout
   const visibleSlotCount = activeLayout === '1' ? 1 : (activeLayout.startsWith('2') ? 2 : (activeLayout.startsWith('3') ? 3 : 4));
 
+  // 1. Initial Checking Auth Loading Screen
+  if (isCheckingAuth) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b0e14', color: '#00e5ff', fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+          <span className="spinner" style={{ width: '32px', height: '32px' }} />
+          <span style={{ fontSize: '13px', letterSpacing: '0.5px' }}>Đang kiểm tra trạng thái đăng nhập...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated Barrier: Render Full-Screen Google Sign-In Screen
+  if (!isAuthenticated) {
+    return <AuthOverlay onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // 3. Authenticated Dashboard
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0b0e14' }}>
       {/* Top Navigation Header */}
       <Header
         currentCode={currentCode}
         activeSymbolObj={activeSymbolObj}
-        onOpenAssetSelector={() => setIsAssetSelectorOpen(true)}
+        onOpenAssetSelector={() => setIsRightSidebarOpen(true)}
         timeframeLabel={timeframeLabel}
         onSelectTimeframe={handleSelectTimeframe}
         wsStatus={wsStatus}
@@ -716,19 +936,23 @@ export default function TerminalPage() {
               if (slots[i]?.code) fetchCandlesForSlot(i, slots[i].code, false, false);
             }
           } else {
-            setIsAssetSelectorOpen(true);
+            setIsRightSidebarOpen(true);
           }
         }}
         activeLayout={activeLayout}
         onSelectLayout={handleSelectLayout}
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
+        isRightSidebarOpen={isRightSidebarOpen}
+        onToggleRightSidebar={handleToggleRightSidebar}
         isAutoSave={isAutoSave}
         onToggleAutoSave={handleToggleAutoSave}
         saveStatus={saveStatus}
         lastSavedTime={lastSavedTime}
         onSaveNow={handleSaveNow}
         onResetLayout={handleResetLayout}
+        user={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* Notification Banner */}
@@ -795,7 +1019,7 @@ export default function TerminalPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           handleSelectSlot(index);
-                          setIsAssetSelectorOpen(true);
+                          setIsRightSidebarOpen(true);
                         }}
                       >
                         {slotSymbolObj?.image && (
@@ -859,7 +1083,7 @@ export default function TerminalPage() {
                   kcxLabelText={kcxLabelText}
                   onOpenAssetSelector={() => {
                     handleSelectSlot(index);
-                    setIsAssetSelectorOpen(true);
+                    setIsRightSidebarOpen(true);
                   }}
                   activeTimezone={activeTimezone}
                   onOpenTimezoneModal={() => setIsTimezoneModalOpen(true)}
@@ -875,6 +1099,20 @@ export default function TerminalPage() {
             );
           })}
         </div>
+
+        {/* Right Watchlist Sidebar & Always-Visible Toggle Button Strip */}
+        <RightWatchlistSidebar
+          isOpen={isRightSidebarOpen}
+          onToggleOpen={handleToggleRightSidebar}
+          targetSlotIndex={activeSlotIndex}
+          onSelectSlot={handleSelectSlot}
+          activeLayout={activeLayout}
+          currentSlotCode={slots[activeSlotIndex]?.code || currentCode}
+          currentSymbolCode={slots[activeSlotIndex]?.symbolObj?.code || activeSymbolObj?.code}
+          currentTimeframeCode={slots[activeSlotIndex]?.code || currentCode}
+          onSelectAsset={handleSelectAsset}
+          visibleSlotCount={visibleSlotCount}
+        />
       </div>
 
       {/* Asset Selector Watchlist Modal */}

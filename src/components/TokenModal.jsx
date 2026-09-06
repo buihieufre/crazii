@@ -24,10 +24,14 @@ export default function TokenModal({
   async function handleManualRefresh() {
     setIsRefreshing(true);
     setAlert(null);
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('crazii_session_token') || '') : '';
     try {
       const res = await fetch('/api/refresh-token', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
       const data = await res.json();
       if (data.success) {
@@ -46,16 +50,20 @@ export default function TokenModal({
   async function handleSaveRefreshToken() {
     const trimmed = refreshTokenInput.trim();
     if (!trimmed) {
-      setAlert({ type: 'error', message: '⚠️ Vui lòng dán mã Refresh Token hợp lệ từ crazii.com' });
+      setAlert({ type: 'error', message: '⚠️ Vui lòng dán mã Refresh Token hợp lệ' });
       return;
     }
 
     setIsSaving(true);
     setAlert(null);
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('crazii_session_token') || '') : '';
     try {
       const res = await fetch('/api/set-refresh-token', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ refreshToken: trimmed })
       });
       const data = await res.json();
@@ -78,7 +86,7 @@ export default function TokenModal({
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-card">
         <div className="modal-header">
-          <h3 className="modal-title">🔐 Crazii Authentication & Auto-Refresh</h3>
+          <h3 className="modal-title">🔐 TRADEWH Authentication & Auto-Refresh</h3>
           <button className="btn" onClick={onClose}>&times;</button>
         </div>
 
@@ -104,11 +112,11 @@ export default function TokenModal({
         {/* Refresh Token Input Form */}
         <div style={{ marginBottom: 12 }}>
           <label style={{ fontSize: 11, fontWeight: 700, color: '#ffffff', display: 'flex', justifyContent: 'space-between' }}>
-            <span>🔑 Crazii Refresh Token (Hạn 3 Ngày)</span>
+            <span>🔑 TRADEWH Refresh Token (Hạn 3 Ngày)</span>
             <span style={{ color: 'var(--accent-green)', fontSize: 10, fontWeight: 700 }}>Khuyên dùng</span>
           </label>
           <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 3, marginBottom: 6 }}>
-            Dán mã Refresh Token (<code>typ: Refresh</code>) lấy từ crazii.com. Chỉ cần dán 1 lần duy nhất mỗi 3 ngày, server sẽ tự động cấp mới Access Token liên tục để biểu đồ không bao giờ bị dừng.
+            Dán mã Refresh Token (<code>typ: Refresh</code>) lấy từ hệ thống TRADEWH. Chỉ cần dán 1 lần duy nhất mỗi 3 ngày, server sẽ tự động cấp mới Access Token liên tục để biểu đồ không bao giờ bị dừng.
           </p>
           <input
             type="text"

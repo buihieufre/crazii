@@ -371,9 +371,9 @@ export default function BotConfigPage() {
           >
             <span>←</span> Quay lại Biểu đồ (Terminal)
           </Link>
-          <div style={{ fontSize: 16, fontWeight: 900, color: '#FFB300', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>🤖 CRAZII.COM</span>
-            <span style={{ fontSize: 13, color: '#787b86', fontWeight: 600 }}>· Telegram Live Signal Bot</span>
+          <div style={{ fontSize: 16, fontWeight: 900, color: '#CBB193', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>🤖 TRADEWH</span>
+            <span style={{ fontSize: 13, color: '#AB978C', fontWeight: 600 }}>· Telegram Live Signal Bot</span>
           </div>
         </div>
 

@@ -51,17 +51,19 @@ header {
 .brand-logo {
   font-weight: 900;
   font-size: 15px;
-  letter-spacing: 1px;
-  color: #FFB300;
+  letter-spacing: 1.2px;
+  color: #CBB193;
   display: flex;
   align-items: baseline;
   user-select: none;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
 .brand-logo span {
   font-size: 10px;
-  color: #ffffff;
-  opacity: 0.8;
+  color: #AB978C;
+  opacity: 0.9;
+  margin-left: 1px;
 }
 
 .symbol-pill {
@@ -84,6 +86,20 @@ header {
   background-color: var(--accent-green);
   box-shadow: 0 0 6px var(--accent-green);
   animation: pulse 2s infinite;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #00E5FF;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .ws-status-badge {
@@ -355,7 +371,7 @@ header {
   font-size: 68px;
   font-weight: 900;
   letter-spacing: 12px;
-  color: rgba(255, 255, 255, 0.035);
+  color: rgba(233, 230, 231, 0.035);
   pointer-events: none;
   user-select: none;
   z-index: 2;
@@ -368,7 +384,7 @@ header {
   font-size: 15px;
   font-weight: 900;
   letter-spacing: 2px;
-  color: rgba(255, 179, 0, 0.5);
+  color: rgba(203, 177, 147, 0.45);
   pointer-events: none;
   z-index: 2;
   display: flex;
@@ -377,7 +393,8 @@ header {
 
 .watermark-top-right span {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(233, 230, 231, 0.4);
+  margin-left: 1px;
 }
 
 .watermark-bottom-left {
@@ -387,14 +404,17 @@ header {
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: rgba(255, 179, 0, 0.4);
+  color: rgba(203, 177, 147, 0.4);
   pointer-events: none;
   z-index: 2;
+  display: flex;
+  align-items: baseline;
 }
 
 .watermark-bottom-left span {
   font-size: 9px;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(233, 230, 231, 0.35);
+  margin-left: 1px;
 }
 
 /* Exact TradingView Stacked Price & Countdown Badge on Right Scale */
