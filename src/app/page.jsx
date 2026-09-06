@@ -10,6 +10,7 @@ import AssetSelector from '@/components/AssetSelector';
 import RightWatchlistSidebar from '@/components/RightWatchlistSidebar';
 import TimezoneModal from '@/components/TimezoneModal';
 import AuthOverlay from '@/components/AuthOverlay';
+import DeviceKickoutModal from '@/components/DeviceKickoutModal';
 import { createClient as createSupabaseClient } from '@/utils/supabase/client';
 import { calculateBarCountdown } from '@/lib/utils';
 import { updateHeaderCountdown } from '@/lib/ohlc-updater';
@@ -21,6 +22,10 @@ export default function TerminalPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+  // Single Device Kick-out State
+  const [isKickoutModalOpen, setIsKickoutModalOpen] = useState(false);
+  const [kickoutMessage, setKickoutMessage] = useState('');
 
   // Layout and Multi-Chart State
   const [activeLayout, setActiveLayout] = useState('1'); // '1' | '2-col' | '2-row' | '3-col' | '3-grid' | '4-grid'
@@ -162,6 +167,16 @@ export default function TerminalPage() {
       }
     }, 1500);
 
+    // Check URL parameters for kickout notice
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('kickout') === '1') {
+        setKickoutMessage('Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc trên thiết bị này đã kết thúc.');
+        setIsKickoutModalOpen(true);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+
     async function verifyAuth() {
       const token = typeof window !== 'undefined' ? localStorage.getItem('crazii_session_token') : null;
 
@@ -187,6 +202,11 @@ export default function TerminalPage() {
               return;
             }
           } else {
+            const errData = await res.json().catch(() => ({}));
+            if (errData.code === 'DEVICE_SESSION_TERMINATED' && isMounted) {
+              setKickoutMessage(errData.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.');
+              setIsKickoutModalOpen(true);
+            }
             // Token invalid or session terminated by new device
             if (typeof window !== 'undefined') {
               localStorage.removeItem('crazii_session_token');
@@ -355,7 +375,9 @@ export default function TerminalPage() {
       if (res.status === 401) {
         const errorData = await res.json().catch(() => ({}));
         if (errorData.code === 'DEVICE_SESSION_TERMINATED') {
-          alert('Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
+          const msg = errorData.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.';
+          setKickoutMessage(msg);
+          setIsKickoutModalOpen(true);
         }
         handleLogout();
         return;
@@ -893,7 +915,9 @@ export default function TerminalPage() {
 
         socket.on('force_logout', (data) => {
           if (isLoggingOutRef.current) return;
-          alert(data?.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
+          const msg = data?.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.';
+          setKickoutMessage(msg);
+          setIsKickoutModalOpen(true);
           handleLogout();
         });
 
@@ -914,7 +938,9 @@ export default function TerminalPage() {
         socket.on('connect_error', (err) => {
           if (isLoggingOutRef.current) return;
           if (err?.message && err.message.includes('DEVICE_SESSION_TERMINATED')) {
-            alert('Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
+            const msg = 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.';
+            setKickoutMessage(msg);
+            setIsKickoutModalOpen(true);
             handleLogout();
             return;
           }
@@ -986,7 +1012,16 @@ export default function TerminalPage() {
 
   // 2. Unauthenticated Barrier: Render Full-Screen Google Sign-In Screen
   if (!isAuthenticated) {
-    return <AuthOverlay onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <>
+        <AuthOverlay onLoginSuccess={handleLoginSuccess} kickoutNotice={kickoutMessage} />
+        <DeviceKickoutModal
+          isOpen={isKickoutModalOpen}
+          message={kickoutMessage}
+          onClose={() => setIsKickoutModalOpen(false)}
+        />
+      </>
+    );
   }
 
   // 3. Authenticated Dashboard
@@ -1222,6 +1257,13 @@ export default function TerminalPage() {
             }
           }
         }}
+      />
+
+      {/* Single-Device Kick-out Alert Modal */}
+      <DeviceKickoutModal
+        isOpen={isKickoutModalOpen}
+        message={kickoutMessage}
+        onClose={() => setIsKickoutModalOpen(false)}
       />
     </div>
   );

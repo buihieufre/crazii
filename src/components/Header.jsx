@@ -353,25 +353,32 @@ export default function Header({
         */}
 
 
-        {/* Subscription / Plan Button */}
-        <Link
-          href="/subscription"
-          className="btn"
-          style={{
-            textDecoration: 'none',
-            background: 'rgba(203, 177, 147, 0.1)',
-            borderColor: 'rgba(203, 177, 147, 0.4)',
-            color: '#CBB193',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            fontWeight: '600'
-          }}
-          title="Quản lý Gói Cước & Đăng Ký (45 USDT/tháng)"
-        >
-          <span>💎</span>
-          <span>Gói Cước</span>
-        </Link>
+        {/* Admin Management Button (Hidden for regular users as requested) */}
+        {Boolean(
+          user && (
+            ['dhieu9b@gmail.com', 'buidinhhieu9b@gmail.com'].includes((user.email || '').toLowerCase().trim()) ||
+            user.role === 'admin'
+          )
+        ) && (
+          <Link
+            href="/subscription"
+            className="btn"
+            style={{
+              textDecoration: 'none',
+              background: 'rgba(203, 177, 147, 0.15)',
+              borderColor: 'rgba(203, 177, 147, 0.4)',
+              color: '#CBB193',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontWeight: '700'
+            }}
+            title="Quản Trị Viên: Tạo TK Dùng Thử & Quản Lý"
+          >
+            <span>👑</span>
+            <span>Quản Trị</span>
+          </Link>
+        )}
 
         {/* Fullscreen Toggle Button */}
         <button

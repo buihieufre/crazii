@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 
-export default function AuthOverlay({ onLoginSuccess }) {
+export default function AuthOverlay({ onLoginSuccess, kickoutNotice }) {
   // 'login' | 'register' | 'otp' | 'forgot' | 'magic_link_sent' | 'magic_reset' | 'reset_password'
   const [authMode, setAuthMode] = useState('login');
   
@@ -683,6 +683,30 @@ export default function AuthOverlay({ onLoginSuccess }) {
           </div>
 
           {/* Alerts */}
+          {kickoutNotice && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.08))',
+              border: '1px solid rgba(239, 68, 68, 0.45)',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              color: '#fecaca',
+              fontSize: '13.5px',
+              lineHeight: '1.45',
+              boxShadow: '0 4px 16px rgba(239, 68, 68, 0.12)'
+            }}>
+              <span style={{ fontSize: '20px', flexShrink: 0 }}>⚠️</span>
+              <div>
+                <strong style={{ display: 'block', color: '#fff', fontSize: '14px', marginBottom: '2px' }}>
+                  Phiên đăng nhập đã kết thúc
+                </strong>
+                <span>{kickoutNotice}</span>
+              </div>
+            </div>
+          )}
           {errorMessage && <div className="alert-box error">{errorMessage}</div>}
           {successMessage && <div className="alert-box success">{successMessage}</div>}
 

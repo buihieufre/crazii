@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                  String              @id
+  email               String?             @unique
+  name                String?
+  avatar_url          String?
+  current_device_id   String?
+  subscription_status Boolean             @default(false)
+  subscription_expiry DateTime?
+  password_hash       String?
+  role                String              @default("user")
+  created_at          DateTime            @default(now())
+  last_sign_in_at     DateTime?
+
+  logins              UserLogin[]
+  orders              SubscriptionOrder[]
+
+  @@map("users")
+}
+
+model UserLogin {
+  id           BigInt   @id @default(autoincrement())
+  user_id      String?
+  email        String?
+  name         String?
+  logged_in_at DateTime @default(now())
+  ip_address   String?
+
+  user         User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("user_logins")
+}
+
+model SubscriptionOrder {
+  id             BigInt    @id @default(autoincrement())
+  order_id       String    @unique
+  user_id        String?
+  email          String?
+  amount         String?
+  currency       String?   @default("USDT")
+  status         String?   @default("pending")
+  payment_url    String?
+  cryptomus_uuid String?
+  paid_at        DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+
+  user           User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@map("subscription_orders")
+}

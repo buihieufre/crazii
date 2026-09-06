@@ -1,6 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
-const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://wlhlspmruezijcghgtqx.supabase.co';
@@ -8,56 +8,42 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_P
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-async function syncAll() {
-  console.log('🔄 Bắt đầu đồng bộ người dùng lên Supabase:', SUPABASE_URL);
-  const usersFile = path.join(__dirname, '..', 'data', 'registered-users.json');
-  if (!fs.existsSync(usersFile)) {
-    console.log('Không tìm thấy file data/registered-users.json');
-    return;
+async function checkSupabaseState() {
+  console.log('🔄 Đang kiểm tra trạng thái Supabase Database:', SUPABASE_URL);
+
+  // 1. Check users table
+  const { data: users, error: uErr } = await supabase.from('users').select('*').limit(10);
+  if (uErr) {
+    console.error(`❌ Lỗi truy vấn bảng 'users': ${uErr.message} (Code: ${uErr.code})`);
+  } else {
+    console.log(`✅ Bảng 'users': Tìm thấy ${users.length} tài khoản trong DB.`);
+    console.table(users.map(u => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      device: u.current_device_id || '(chưa có)',
+      sub_status: u.subscription_status,
+      role: u.role
+    })));
   }
 
-  const users = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
-  console.log(`Tìm thấy ${users.length} tài khoản trong hệ thống local.`);
-
-  for (const u of users) {
-    const userId = u.id || u.sub;
-    console.log(`Đang đồng bộ: ${u.email} (ID: ${userId})...`);
-
-    // 1. Upsert to users
-    const { error: uErr } = await supabase.from('users').upsert({
-      id: userId,
-      email: u.email,
-      name: u.name || u.email.split('@')[0],
-      avatar_url: u.avatar_url || u.picture || null,
-      last_sign_in_at: u.last_sign_in_at || new Date().toISOString()
-    }, { onConflict: 'id' });
-
-    if (uErr) {
-      console.error(`❌ Lỗi đồng bộ 'users' cho ${u.email}:`, uErr.message, `(Code: ${uErr.code})`);
-      if (uErr.code === '42501') {
-        console.log('👉 Gợi ý: Bảng đang bật RLS. Hãy tắt RLS hoặc cấp quyền trong Supabase SQL Editor.');
-      }
-    } else {
-      console.log(`✅ Đã đồng bộ thành công vào bảng 'users': ${u.email}`);
-    }
-
-    // 2. Insert login event
-    const { error: lErr } = await supabase.from('user_logins').insert({
-      user_id: userId,
-      email: u.email,
-      name: u.name || u.email.split('@')[0],
-      logged_in_at: u.last_sign_in_at || new Date().toISOString(),
-      ip_address: '127.0.0.1'
-    });
-
-    if (lErr) {
-      console.error(`❌ Lỗi thêm vào 'user_logins' cho ${u.email}:`, lErr.message, `(Code: ${lErr.code})`);
-    } else {
-      console.log(`✅ Đã thêm lịch sử đăng nhập vào bảng 'user_logins': ${u.email}`);
-    }
+  // 2. Check user_logins table
+  const { data: logins, error: lErr } = await supabase.from('user_logins').select('*').order('logged_in_at', { ascending: false }).limit(5);
+  if (lErr) {
+    console.error(`❌ Lỗi truy vấn bảng 'user_logins': ${lErr.message}`);
+  } else {
+    console.log(`✅ Bảng 'user_logins': Tìm thấy ${logins.length} bản ghi đăng nhập gần nhất.`);
   }
 
-  console.log('🏁 Hoàn tất quá trình đồng bộ.');
+  // 3. Check subscription_orders table
+  const { data: orders, error: oErr } = await supabase.from('subscription_orders').select('*').limit(5);
+  if (oErr) {
+    console.log(`⚠️ Bảng 'subscription_orders' chưa được tạo hoặc RLS chặn: ${oErr.message}`);
+  } else {
+    console.log(`✅ Bảng 'subscription_orders': Sẵn sàng, tìm thấy ${orders.length} đơn hàng.`);
+  }
+
+  console.log('🏁 Hoàn tất kiểm tra.');
 }
 
-syncAll();
+checkSupabaseState();

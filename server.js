@@ -45,30 +45,42 @@ function isUserAdmin(user) {
 function isUserSubscriptionActive(user) {
   if (!user) return false;
   if (isUserAdmin(user)) return true;
-  if (user.subscriptionExpiry) {
-    const expiryTime = new Date(user.subscriptionExpiry).getTime();
+  const expiry = user.subscriptionExpiry || user.subscription_expiry;
+  if (expiry) {
+    const expiryTime = new Date(expiry).getTime();
     return !isNaN(expiryTime) && expiryTime > Date.now();
   }
   return false;
 }
 
 // Active Sockets tracker for instant 0ms single-device kick-out
+let ioServer = null;
 const activeUserSockets = new Map(); // userId -> Set of clientSocket instances
 
-function kickoutUserSockets(userId, newDeviceId) {
-  if (!userId) return;
-  const sockets = activeUserSockets.get(userId);
-  if (sockets && sockets.size > 0) {
-    for (const s of sockets) {
-      if (s.deviceId !== newDeviceId) {
-        console.log(`[Single Device] ⚡ Forcefully logging out socket session for user ${userId}`);
-        try {
-          s.emit('force_logout', {
-            code: 'DEVICE_SESSION_TERMINATED',
-            message: 'Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.'
-          });
-          s.disconnect(true);
-        } catch (e) {}
+function kickoutUserSockets(userIdentifier, newDeviceId) {
+  if (!userIdentifier) return;
+  const key = String(userIdentifier).toLowerCase().trim();
+  console.log(`[Single Device] ⚡ Checking sockets to kick out for user: "${key}" (newDeviceId: ${newDeviceId})`);
+
+  if (ioServer && ioServer.sockets && ioServer.sockets.sockets) {
+    for (const [socketId, s] of ioServer.sockets.sockets) {
+      const sEmail = (s.userEmail || s.user?.email || '').toLowerCase().trim();
+      const sId = String(s.userId || s.user?.id || s.user?.sub || '').toLowerCase().trim();
+
+      const isMatch = (sEmail && (sEmail === key || key.includes(sEmail))) || (sId && sId === key);
+      if (isMatch) {
+        if (s.deviceId && s.deviceId !== newDeviceId) {
+          console.log(`[Single Device] ⚡ Kicking out old socket (${s.id}) for user ${key}. (Old device: ${s.deviceId} !== New device: ${newDeviceId})`);
+          try {
+            s.emit('force_logout', {
+              code: 'DEVICE_SESSION_TERMINATED',
+              message: 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.'
+            });
+            setTimeout(() => {
+              try { s.disconnect(true); } catch (e) {}
+            }, 100);
+          } catch (e) {}
+        }
       }
     }
   }
@@ -81,46 +93,122 @@ function generateCryptomusSignature(payload, apiKey) {
   return crypto.createHash('md5').update(base64Data + apiKey).digest('hex');
 }
 
-// Supabase Server Client Configuration
+// Supabase & Prisma ORM Database Configurations
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://wlhlspmruezijcghgtqx.supabase.co';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_6Atv2XIec0c5qV75FTEWCg_gNLh7tDw';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
 const supabaseServer = createSupabaseClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Local Registered Users Storage Helper
-const USERS_FILE = path.join(__dirname, 'data', 'registered-users.json');
+// Prisma ORM Client
+const { prisma } = require('./src/lib/prisma');
 
-function getLocalUsers() {
-  try {
-    if (fs.existsSync(USERS_FILE)) {
-      const raw = fs.readFileSync(USERS_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) {}
-  return [];
-}
+/**
+ * ----------------------------------------------------
+ * PRISMA ORM AS PRIMARY DATA ACCESS LAYER
+ * ----------------------------------------------------
+ */
 
-function saveLocalUser(userObj) {
+// Helper: Upsert full user profile to database via Prisma ORM
+async function saveUserToDb(userObj) {
+  if (!userObj) return null;
+  const userId = String(userObj.id || userObj.sub || '').trim();
+  const cleanEmail = userObj.email ? userObj.email.toLowerCase().trim() : null;
+  const now = new Date();
+
+  const dataPayload = {
+    id: userId,
+    email: cleanEmail,
+    name: userObj.name || cleanEmail?.split('@')[0] || 'User',
+    avatar_url: userObj.avatar_url || userObj.picture || null,
+    current_device_id: userObj.currentDeviceId || userObj.current_device_id || null,
+    subscription_status: isUserSubscriptionActive(userObj),
+    subscription_expiry: userObj.subscriptionExpiry || userObj.subscription_expiry ? new Date(userObj.subscriptionExpiry || userObj.subscription_expiry) : null,
+    password_hash: userObj.password_hash || userObj.passwordHash || null,
+    role: isUserAdmin(userObj) ? 'admin' : (userObj.role || 'user'),
+    last_sign_in_at: userObj.last_sign_in_at ? new Date(userObj.last_sign_in_at) : now
+  };
+
   try {
-    const list = getLocalUsers();
-    const existingIdx = list.findIndex(u => (u.email && u.email.toLowerCase() === userObj.email.toLowerCase()) || (userObj.id && (u.id === userObj.id || u.sub === userObj.id)));
-    if (existingIdx >= 0) {
-      list[existingIdx] = { ...list[existingIdx], ...userObj, last_sign_in_at: new Date().toISOString() };
-    } else {
-      list.push({ ...userObj, created_at: new Date().toISOString(), last_sign_in_at: new Date().toISOString() });
+    if (prisma && prisma.user) {
+      const user = await prisma.user.upsert({
+        where: { id: userId },
+        update: {
+          email: dataPayload.email,
+          name: dataPayload.name,
+          avatar_url: dataPayload.avatar_url,
+          current_device_id: dataPayload.current_device_id,
+          subscription_status: dataPayload.subscription_status,
+          subscription_expiry: dataPayload.subscription_expiry,
+          password_hash: dataPayload.password_hash,
+          role: dataPayload.role,
+          last_sign_in_at: dataPayload.last_sign_in_at
+        },
+        create: dataPayload
+      });
+      return user;
     }
-    fs.writeFileSync(USERS_FILE, JSON.stringify(list, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Error saving local user:', e.message);
+  } catch (err) {
+    console.warn(`[Prisma ORM] ⚠️ Notice upserting user ${cleanEmail}:`, err.message);
   }
+
+  // Fallback to Supabase REST client if DB connection is in transition
+  if (supabaseServer) {
+    try {
+      const { data } = await supabaseServer.from('users').upsert({
+        id: userId,
+        email: cleanEmail,
+        name: dataPayload.name,
+        avatar_url: dataPayload.avatar_url,
+        current_device_id: dataPayload.current_device_id,
+        subscription_status: dataPayload.subscription_status,
+        subscription_expiry: dataPayload.subscription_expiry ? dataPayload.subscription_expiry.toISOString() : null,
+        password_hash: dataPayload.password_hash,
+        role: dataPayload.role,
+        last_sign_in_at: dataPayload.last_sign_in_at ? dataPayload.last_sign_in_at.toISOString() : now.toISOString()
+      }, { onConflict: 'id' }).select().maybeSingle();
+      return data;
+    } catch (e) {}
+  }
+
+  return null;
 }
 
+// Backward-compatible alias
+const saveUserToSupabase = saveUserToDb;
+
+// Helper: Query user by email from database via Prisma ORM
 async function findUserByEmail(email) {
   if (!email) return null;
   const cleanEmail = email.toLowerCase().trim();
 
-  // 1. Try Supabase users table
+  try {
+    if (prisma && prisma.user) {
+      const data = await prisma.user.findFirst({
+        where: {
+          email: { equals: cleanEmail, mode: 'insensitive' }
+        }
+      });
+
+      if (data) {
+        return {
+          ...data,
+          id: data.id,
+          sub: data.id,
+          email: data.email,
+          name: data.name || cleanEmail.split('@')[0],
+          currentDeviceId: data.current_device_id || null,
+          subscriptionStatus: Boolean(data.subscription_status),
+          subscriptionExpiry: data.subscription_expiry ? data.subscription_expiry.toISOString() : null,
+          password_hash: data.password_hash || null,
+          role: data.role || (isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user')
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[Prisma ORM] ⚠️ findUserByEmail notice:`, err.message);
+  }
+
+  // Fallback to Supabase REST
   if (supabaseServer) {
     try {
       const { data, error } = await supabaseServer
@@ -128,147 +216,218 @@ async function findUserByEmail(email) {
         .select('*')
         .ilike('email', cleanEmail)
         .maybeSingle();
+
       if (!error && data) {
         return {
           ...data,
-          currentDeviceId: data.current_device_id || data.currentDeviceId,
-          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
-          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
+          id: data.id,
+          sub: data.id,
+          email: data.email,
+          name: data.name || cleanEmail.split('@')[0],
+          currentDeviceId: data.current_device_id || null,
+          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : false,
+          subscriptionExpiry: data.subscription_expiry || null,
+          password_hash: data.password_hash || null,
+          role: data.role || (isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user')
         };
       }
     } catch (e) {}
   }
 
-  // 2. Try Local registered users store fallback
-  const list = getLocalUsers();
-  return list.find(u => u.email && u.email.toLowerCase().trim() === cleanEmail) || null;
+  return null;
 }
 
+// Helper: Query user by ID from database via Prisma ORM
 async function findUserById(id) {
   if (!id) return null;
   const strId = String(id).trim();
 
-  // 1. Try Supabase users table
+  try {
+    if (prisma && prisma.user) {
+      const data = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { id: strId },
+            { email: { equals: strId, mode: 'insensitive' } }
+          ]
+        }
+      });
+
+      if (data) {
+        return {
+          ...data,
+          id: data.id,
+          sub: data.id,
+          email: data.email,
+          name: data.name || data.email?.split('@')[0],
+          currentDeviceId: data.current_device_id || null,
+          subscriptionStatus: Boolean(data.subscription_status),
+          subscriptionExpiry: data.subscription_expiry ? data.subscription_expiry.toISOString() : null,
+          password_hash: data.password_hash || null,
+          role: data.role || (isUserAdmin(data) ? 'admin' : 'user')
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[Prisma ORM] ⚠️ findUserById notice:`, err.message);
+  }
+
+  // Fallback to Supabase REST
   if (supabaseServer) {
     try {
-      const { data, error } = await supabaseServer
-        .from('users')
-        .select('*')
-        .eq('id', strId)
-        .maybeSingle();
+      let query = supabaseServer.from('users').select('*');
+      if (strId.includes('@')) {
+        query = query.ilike('email', strId.toLowerCase());
+      } else {
+        query = query.eq('id', strId);
+      }
+
+      const { data, error } = await query.maybeSingle();
       if (!error && data) {
         return {
           ...data,
-          currentDeviceId: data.current_device_id || data.currentDeviceId,
-          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
-          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
+          id: data.id,
+          sub: data.id,
+          email: data.email,
+          name: data.name || data.email?.split('@')[0],
+          currentDeviceId: data.current_device_id || null,
+          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : false,
+          subscriptionExpiry: data.subscription_expiry || null,
+          password_hash: data.password_hash || null,
+          role: data.role || (isUserAdmin(data) ? 'admin' : 'user')
         };
       }
     } catch (e) {}
   }
 
-  // 2. Try Local registered users store fallback
-  const list = getLocalUsers();
-  return list.find(u => String(u.id || u.sub).trim() === strId) || null;
+  return null;
 }
 
-// Subscription Orders Store Helper
-const ORDERS_FILE = path.join(__dirname, 'data', 'subscription-orders.json');
-
-function getSubscriptionOrders() {
+// Helper: Save Subscription Order via Prisma ORM
+async function saveSubscriptionOrder(orderObj) {
+  if (!orderObj) return;
   try {
-    if (fs.existsSync(ORDERS_FILE)) {
-      const raw = fs.readFileSync(ORDERS_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+    if (prisma && prisma.subscriptionOrder) {
+      await prisma.subscriptionOrder.upsert({
+        where: { order_id: orderObj.order_id },
+        update: {
+          user_id: orderObj.user_id || null,
+          email: orderObj.email || null,
+          amount: String(orderObj.amount || '45.00'),
+          currency: orderObj.currency || 'USDT',
+          status: orderObj.status || 'pending',
+          payment_url: orderObj.payment_url || null,
+          cryptomus_uuid: orderObj.cryptomus_uuid || null,
+          paid_at: orderObj.paid_at ? new Date(orderObj.paid_at) : null
+        },
+        create: {
+          order_id: orderObj.order_id,
+          user_id: orderObj.user_id || null,
+          email: orderObj.email || null,
+          amount: String(orderObj.amount || '45.00'),
+          currency: orderObj.currency || 'USDT',
+          status: orderObj.status || 'pending',
+          payment_url: orderObj.payment_url || null,
+          cryptomus_uuid: orderObj.cryptomus_uuid || null,
+          paid_at: orderObj.paid_at ? new Date(orderObj.paid_at) : null
+        }
+      });
+      console.log(`[Prisma ORM] ✅ Saved subscription order ${orderObj.order_id} (${orderObj.status})`);
+      return;
     }
-  } catch (e) {}
-  return [];
-}
-
-function saveSubscriptionOrder(orderObj) {
-  try {
-    const list = getSubscriptionOrders();
-    const existingIdx = list.findIndex(o => o.order_id === orderObj.order_id);
-    if (existingIdx >= 0) {
-      list[existingIdx] = { ...list[existingIdx], ...orderObj, updated_at: new Date().toISOString() };
-    } else {
-      list.push({ ...orderObj, created_at: new Date().toISOString() });
-    }
-    fs.writeFileSync(ORDERS_FILE, JSON.stringify(list, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Error saving subscription order:', e.message);
+  } catch (err) {
+    console.warn(`[Prisma ORM] ⚠️ Notice saving subscription order:`, err.message);
   }
+
+  // Fallback to Supabase REST
+  if (supabaseServer) {
+    try {
+      const payload = {
+        order_id: orderObj.order_id,
+        user_id: orderObj.user_id || null,
+        email: orderObj.email || null,
+        amount: String(orderObj.amount || '45.00'),
+        currency: orderObj.currency || 'USDT',
+        status: orderObj.status || 'pending',
+        payment_url: orderObj.payment_url || null,
+        cryptomus_uuid: orderObj.cryptomus_uuid || null,
+        paid_at: orderObj.paid_at || null,
+        updated_at: new Date().toISOString()
+      };
+      await supabaseServer.from('subscription_orders').upsert(payload, { onConflict: 'order_id' });
+    } catch (e) {}
+  }
+}
+
+// Helper: Find Subscription Order by order_id via Prisma ORM
+async function findSubscriptionOrder(orderId) {
+  if (!orderId) return null;
+  try {
+    if (prisma && prisma.subscriptionOrder) {
+      const order = await prisma.subscriptionOrder.findUnique({
+        where: { order_id: orderId }
+      });
+      if (order) return order;
+    }
+  } catch (err) {
+    console.warn(`[Prisma ORM] ⚠️ Notice finding subscription order:`, err.message);
+  }
+
+  // Fallback to Supabase REST
+  if (supabaseServer) {
+    try {
+      const { data, error } = await supabaseServer
+        .from('subscription_orders')
+        .select('*')
+        .eq('order_id', orderId)
+        .maybeSingle();
+      if (!error && data) return data;
+    } catch (e) {}
+  }
+
+  return null;
 }
 
 /**
- * Record user profile and login event to Supabase with comprehensive error feedback
+ * Record user profile and login event via Prisma ORM & Database
  */
 async function recordUserLoginToSupabase(user, req) {
-  if (!supabaseServer) return;
+  if (!user) return;
   const ip = req?.ip || req?.headers?.['x-forwarded-for'] || '127.0.0.1';
-  const nowIso = new Date().toISOString();
   const userId = user.id || user.sub;
 
-  // 1. Sync User Profile to 'users' table
+  // 1. Sync User Profile to Database
+  await saveUserToDb(user);
+
+  // 2. Insert Login Event via Prisma ORM
   try {
-    const fullPayload = {
-      id: userId,
-      email: user.email,
-      name: user.name || user.email?.split('@')[0],
-      avatar_url: user.avatar_url || user.picture || null,
-      current_device_id: user.currentDeviceId || null,
-      subscription_status: isUserSubscriptionActive(user),
-      subscription_expiry: user.subscriptionExpiry || null,
-      role: isUserAdmin(user) ? 'admin' : (user.role || 'user'),
-      last_sign_in_at: nowIso,
-    };
-
-    const { error: uErr } = await supabaseServer.from('users').upsert(fullPayload, { onConflict: 'id' });
-
-    if (uErr) {
-      // If error is about missing extra column in Supabase schema, retry with basic columns
-      if (uErr.code === 'PGRST204' || uErr.message?.includes('column')) {
-        const basePayload = {
-          id: userId,
+    if (prisma && prisma.userLogin) {
+      await prisma.userLogin.create({
+        data: {
+          user_id: userId,
           email: user.email,
           name: user.name || user.email?.split('@')[0],
-          avatar_url: user.avatar_url || user.picture || null,
-          last_sign_in_at: nowIso,
-        };
-        const { error: bErr } = await supabaseServer.from('users').upsert(basePayload, { onConflict: 'id' });
-        if (!bErr) {
-          console.log(`[Supabase Sync] ✅ Synced basic user profile to 'users': ${user.email}`);
-        } else {
-          console.error(`[Supabase Sync] ❌ Failed to upsert to 'users': ${bErr.message}`);
+          ip_address: ip
         }
-      } else {
-        console.error(`[Supabase Sync] ❌ Failed to upsert to 'users': ${uErr.message} (Code: ${uErr.code})`);
-      }
-    } else {
-      console.log(`[Supabase Sync] ✅ Synced user profile to 'users' table: ${user.email}`);
+      });
+      console.log(`[Prisma ORM] ✅ Logged in record inserted for: ${user.email}`);
+      return;
     }
   } catch (err) {
-    console.error(`[Supabase Sync] ❌ Exception upserting to 'users':`, err.message);
+    console.warn(`[Prisma ORM] ⚠️ Login event record notice:`, err.message);
   }
 
-  // 2. Insert Login Event to 'user_logins' table
-  try {
-    const { error: lErr } = await supabaseServer.from('user_logins').insert({
-      user_id: userId,
-      email: user.email,
-      name: user.name || user.email?.split('@')[0],
-      logged_in_at: nowIso,
-      ip_address: ip
-    });
-
-    if (lErr) {
-      console.error(`[Supabase Sync] ❌ Failed to insert to 'user_logins': ${lErr.message} (Code: ${lErr.code})`);
-    } else {
-      console.log(`[Supabase Sync] ✅ Inserted login record to 'user_logins' table: ${user.email}`);
-    }
-  } catch (err) {
-    console.error(`[Supabase Sync] ❌ Exception inserting to 'user_logins':`, err.message);
+  // Fallback to Supabase REST
+  if (supabaseServer) {
+    try {
+      await supabaseServer.from('user_logins').insert({
+        user_id: userId,
+        email: user.email,
+        name: user.name || user.email?.split('@')[0],
+        logged_in_at: new Date().toISOString(),
+        ip_address: ip
+      });
+    } catch (e) {}
   }
 }
 
@@ -580,6 +739,7 @@ nextApp.prepare().then(() => {
       methods: ['GET', 'POST']
     }
   });
+  ioServer = io;
 
   // Mutex for single-flight token refresh
   let inFlightRefreshPromise = null;
@@ -985,8 +1145,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       role: isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user'
     };
 
-    saveLocalUser(user);
-    recordUserLoginToSupabase(user, req);
+    await recordUserLoginToSupabase(user, req);
 
     pendingRegistrations.delete(cleanEmail);
 
@@ -1074,8 +1233,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       last_sign_in_at: new Date().toISOString()
     };
 
-    saveLocalUser(updatedUser);
-    recordUserLoginToSupabase(updatedUser, req);
+    await recordUserLoginToSupabase(updatedUser, req);
 
     const user = {
       sub: userId,
@@ -1239,8 +1397,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       last_sign_in_at: new Date().toISOString()
     };
 
-    saveLocalUser(updatedUser);
-    recordUserLoginToSupabase(updatedUser, req);
+    await recordUserLoginToSupabase(updatedUser, req);
 
     // Invalidate the magic token so it can only be used once
     pendingMagicResetTokens.delete(cleanToken);
@@ -1360,8 +1517,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       last_sign_in_at: new Date().toISOString()
     };
 
-    saveLocalUser(updatedUser);
-    recordUserLoginToSupabase(updatedUser, req);
+    await recordUserLoginToSupabase(updatedUser, req);
 
     pendingPasswordResets.delete(cleanEmail);
 
@@ -1469,23 +1625,14 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         email: email,
         name: payload.name || email.split('@')[0],
         picture: payload.picture || null,
+        avatar_url: payload.picture || null,
         currentDeviceId: newDeviceId,
         subscriptionStatus: isUserSubscriptionActive(existingUser || {}),
         subscriptionExpiry: existingUser?.subscriptionExpiry || null,
         role: isUserAdmin({ email }) ? 'admin' : (existingUser?.role || 'user')
       };
 
-      saveLocalUser({
-        id: user.sub,
-        email: user.email,
-        name: user.name,
-        avatar_url: user.picture,
-        currentDeviceId: newDeviceId,
-        subscriptionStatus: user.subscriptionStatus,
-        subscriptionExpiry: user.subscriptionExpiry,
-        role: user.role
-      });
-      recordUserLoginToSupabase(user, req);
+      await recordUserLoginToSupabase(user, req);
 
       const sessionToken = createSessionToken(user, newDeviceId);
       const isNewUser = !existingUser;
@@ -1599,7 +1746,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
 
         const data = await response.json();
         if (data && data.result && data.result.url) {
-          saveSubscriptionOrder({
+          await saveSubscriptionOrder({
             order_id: orderId,
             user_id: userId,
             email: user.email,
@@ -1631,7 +1778,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     } else {
       // Fallback Demo / Simulated Payment Flow for development & testing
       const mockUrl = `https://pay.cryptomus.com/pay/mock_${orderId}`;
-      saveSubscriptionOrder({
+      await saveSubscriptionOrder({
         order_id: orderId,
         user_id: userId,
         email: user.email,
@@ -1704,10 +1851,9 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
             subscriptionExpiry: newExpiry
           };
 
-          saveLocalUser(updated);
-          recordUserLoginToSupabase(updated, req);
+          await recordUserLoginToSupabase(updated, req);
 
-          saveSubscriptionOrder({
+          await saveSubscriptionOrder({
             order_id: order_id,
             user_id: targetUser.id || targetUser.sub,
             email: targetUser.email,
@@ -1729,10 +1875,9 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   });
 
   // GET /api/payment/status/:orderId (Check order status)
-  app.get('/api/payment/status/:orderId', requireAuthAndDevice, (req, res) => {
+  app.get('/api/payment/status/:orderId', requireAuthAndDevice, async (req, res) => {
     const { orderId } = req.params;
-    const orders = getSubscriptionOrders();
-    const order = orders.find(o => o.order_id === orderId);
+    const order = await findSubscriptionOrder(orderId);
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng' });
@@ -1786,8 +1931,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       subscriptionExpiry: newExpiry
     };
 
-    saveLocalUser(updatedUser);
-    recordUserLoginToSupabase(updatedUser, req);
+    await recordUserLoginToSupabase(updatedUser, req);
 
     console.log(`[Admin Trial] 🎁 Admin ${requester.email} granted ${days}-day trial to ${targetUser.email} until ${newExpiry}`);
 
@@ -1799,6 +1943,91 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         email: updatedUser.email,
         subscriptionStatus: true,
         subscriptionExpiry: newExpiry
+      }
+    });
+  });
+
+  // POST /api/admin/create-trial-user (Generate Random Trial User Account)
+  app.post('/api/admin/create-trial-user', requireAuthAndDevice, async (req, res) => {
+    const requester = req.user;
+    const adminKey = req.headers['x-admin-key'];
+    const isAdmin = isUserAdmin(requester) || adminKey === ADMIN_SECRET_KEY;
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN',
+        message: 'Bạn không có quyền thực hiện tính năng quản trị này.'
+      });
+    }
+
+    const { days = 3, prefix = 'trial', note = '' } = req.body || {};
+    const trialDays = Math.max(1, Math.min(365, parseInt(days, 10) || 3));
+
+    // Generate unique random email
+    let generatedEmail = '';
+    let isUnique = false;
+    let attempts = 0;
+    const cleanPrefix = (prefix || 'trial').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'trial';
+
+    while (!isUnique && attempts < 10) {
+      attempts++;
+      const randomHex = crypto.randomBytes(3).toString('hex'); // 6 random characters
+      generatedEmail = `${cleanPrefix}_${randomHex}@tradewh.com`;
+      const existing = await findUserByEmail(generatedEmail);
+      if (!existing) {
+        isUnique = true;
+      }
+    }
+
+    if (!isUnique) {
+      return res.status(500).json({
+        success: false,
+        message: 'Không thể tạo email ngẫu nhiên duy nhất, vui lòng thử lại.'
+      });
+    }
+
+    // Generate readable random password (e.g. Trade@749201)
+    const randomDigits = Math.floor(100000 + Math.random() * 900000);
+    const plainPassword = `Trade@${randomDigits}`;
+    const passwordHash = hashPassword(plainPassword);
+
+    const userId = 'usr_' + crypto.randomBytes(8).toString('hex');
+    const trialDurationMs = trialDays * 24 * 3600 * 1000;
+    const expiryDate = new Date(Date.now() + trialDurationMs);
+
+    const newUser = {
+      id: userId,
+      sub: userId,
+      email: generatedEmail,
+      name: note ? `${note} (${trialDays}d)` : `Dùng thử (${trialDays} ngày)`,
+      password_hash: passwordHash,
+      subscriptionStatus: true,
+      subscriptionExpiry: expiryDate.toISOString(),
+      role: 'user'
+    };
+
+    await saveUserToDb(newUser);
+
+    console.log(`[Admin Trial] 🎲 Admin ${requester.email} generated trial account: ${generatedEmail} (${trialDays} days, exp: ${expiryDate.toISOString()})`);
+
+    return res.json({
+      success: true,
+      message: `Tạo tài khoản dùng thử ${trialDays} ngày thành công!`,
+      account: {
+        id: userId,
+        email: generatedEmail,
+        password: plainPassword,
+        days: trialDays,
+        subscriptionExpiry: expiryDate.toISOString(),
+        expiryDateFormatted: expiryDate.toLocaleDateString('vi-VN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        createdAt: new Date().toISOString()
       }
     });
   });
@@ -2241,6 +2470,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           return next(new Error('DEVICE_SESSION_TERMINATED: Logged in from another device.'));
         }
         socket.user = dbUser;
+        socket.userEmail = (dbUser.email || sessionPayload.email).toLowerCase().trim();
         socket.userId = dbUser.id || dbUser.sub;
         socket.deviceId = sessionPayload.deviceId;
         console.log(`[Socket Auth] 👤 Socket connected for: ${dbUser.email} (Device: ${sessionPayload.deviceId})`);
@@ -2255,6 +2485,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     }
 
     socket.user = anyUser;
+    socket.userEmail = (anyUser.email || '').toLowerCase().trim();
     socket.userId = anyUser.id || anyUser.sub;
     socket.deviceId = anyUser.deviceId || null;
     console.log(`[Socket Auth] 👤 Socket connection authenticated for: ${anyUser.email}`);
