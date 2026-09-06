@@ -87,6 +87,120 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.e
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
 const supabaseServer = createSupabaseClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Local Registered Users Storage Helper
+const USERS_FILE = path.join(__dirname, 'data', 'registered-users.json');
+
+function getLocalUsers() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const raw = fs.readFileSync(USERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveLocalUser(userObj) {
+  try {
+    const list = getLocalUsers();
+    const existingIdx = list.findIndex(u => (u.email && u.email.toLowerCase() === userObj.email.toLowerCase()) || (userObj.id && (u.id === userObj.id || u.sub === userObj.id)));
+    if (existingIdx >= 0) {
+      list[existingIdx] = { ...list[existingIdx], ...userObj, last_sign_in_at: new Date().toISOString() };
+    } else {
+      list.push({ ...userObj, created_at: new Date().toISOString(), last_sign_in_at: new Date().toISOString() });
+    }
+    fs.writeFileSync(USERS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving local user:', e.message);
+  }
+}
+
+async function findUserByEmail(email) {
+  if (!email) return null;
+  const cleanEmail = email.toLowerCase().trim();
+
+  // 1. Try Supabase users table
+  if (supabaseServer) {
+    try {
+      const { data, error } = await supabaseServer
+        .from('users')
+        .select('*')
+        .ilike('email', cleanEmail)
+        .maybeSingle();
+      if (!error && data) {
+        return {
+          ...data,
+          currentDeviceId: data.current_device_id || data.currentDeviceId,
+          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
+          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
+        };
+      }
+    } catch (e) {}
+  }
+
+  // 2. Try Local registered users store fallback
+  const list = getLocalUsers();
+  return list.find(u => u.email && u.email.toLowerCase().trim() === cleanEmail) || null;
+}
+
+async function findUserById(id) {
+  if (!id) return null;
+  const strId = String(id).trim();
+
+  // 1. Try Supabase users table
+  if (supabaseServer) {
+    try {
+      const { data, error } = await supabaseServer
+        .from('users')
+        .select('*')
+        .eq('id', strId)
+        .maybeSingle();
+      if (!error && data) {
+        return {
+          ...data,
+          currentDeviceId: data.current_device_id || data.currentDeviceId,
+          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
+          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
+        };
+      }
+    } catch (e) {}
+  }
+
+  // 2. Try Local registered users store fallback
+  const list = getLocalUsers();
+  return list.find(u => String(u.id || u.sub).trim() === strId) || null;
+}
+
+// Subscription Orders Store Helper
+const ORDERS_FILE = path.join(__dirname, 'data', 'subscription-orders.json');
+
+function getSubscriptionOrders() {
+  try {
+    if (fs.existsSync(ORDERS_FILE)) {
+      const raw = fs.readFileSync(ORDERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveSubscriptionOrder(orderObj) {
+  try {
+    const list = getSubscriptionOrders();
+    const existingIdx = list.findIndex(o => o.order_id === orderObj.order_id);
+    if (existingIdx >= 0) {
+      list[existingIdx] = { ...list[existingIdx], ...orderObj, updated_at: new Date().toISOString() };
+    } else {
+      list.push({ ...orderObj, created_at: new Date().toISOString() });
+    }
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving subscription order:', e.message);
+  }
+}
+
 /**
  * Record user profile and login event to Supabase with comprehensive error feedback
  */
@@ -98,7 +212,7 @@ async function recordUserLoginToSupabase(user, req) {
 
   // 1. Sync User Profile to 'users' table
   try {
-    const { error: uErr } = await supabaseServer.from('users').upsert({
+    const fullPayload = {
       id: userId,
       email: user.email,
       name: user.name || user.email?.split('@')[0],
@@ -108,10 +222,29 @@ async function recordUserLoginToSupabase(user, req) {
       subscription_expiry: user.subscriptionExpiry || null,
       role: isUserAdmin(user) ? 'admin' : (user.role || 'user'),
       last_sign_in_at: nowIso,
-    }, { onConflict: 'id' });
+    };
+
+    const { error: uErr } = await supabaseServer.from('users').upsert(fullPayload, { onConflict: 'id' });
 
     if (uErr) {
-      console.error(`[Supabase Sync] ❌ Failed to upsert to 'users': ${uErr.message} (Code: ${uErr.code})`);
+      // If error is about missing extra column in Supabase schema, retry with basic columns
+      if (uErr.code === 'PGRST204' || uErr.message?.includes('column')) {
+        const basePayload = {
+          id: userId,
+          email: user.email,
+          name: user.name || user.email?.split('@')[0],
+          avatar_url: user.avatar_url || user.picture || null,
+          last_sign_in_at: nowIso,
+        };
+        const { error: bErr } = await supabaseServer.from('users').upsert(basePayload, { onConflict: 'id' });
+        if (!bErr) {
+          console.log(`[Supabase Sync] ✅ Synced basic user profile to 'users': ${user.email}`);
+        } else {
+          console.error(`[Supabase Sync] ❌ Failed to upsert to 'users': ${bErr.message}`);
+        }
+      } else {
+        console.error(`[Supabase Sync] ❌ Failed to upsert to 'users': ${uErr.message} (Code: ${uErr.code})`);
+      }
     } else {
       console.log(`[Supabase Sync] ✅ Synced user profile to 'users' table: ${user.email}`);
     }
@@ -762,119 +895,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   }
 }
 
-// Local Registered Users Storage Helper
-const USERS_FILE = path.join(__dirname, 'data', 'registered-users.json');
 
-function getLocalUsers() {
-  try {
-    if (fs.existsSync(USERS_FILE)) {
-      const raw = fs.readFileSync(USERS_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) {}
-  return [];
-}
-
-function saveLocalUser(userObj) {
-  try {
-    const list = getLocalUsers();
-    const existingIdx = list.findIndex(u => (u.email && u.email.toLowerCase() === userObj.email.toLowerCase()) || u.id === userObj.id);
-    if (existingIdx >= 0) {
-      list[existingIdx] = { ...list[existingIdx], ...userObj, last_sign_in_at: new Date().toISOString() };
-    } else {
-      list.push({ ...userObj, created_at: new Date().toISOString(), last_sign_in_at: new Date().toISOString() });
-    }
-    fs.writeFileSync(USERS_FILE, JSON.stringify(list, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Error saving local user:', e.message);
-  }
-}
-
-async function findUserByEmail(email) {
-  if (!email) return null;
-  const cleanEmail = email.toLowerCase().trim();
-
-  // 1. Try Supabase users table
-  if (supabaseServer) {
-    try {
-      const { data, error } = await supabaseServer
-        .from('users')
-        .select('*')
-        .ilike('email', cleanEmail)
-        .maybeSingle();
-      if (!error && data) {
-        return {
-          ...data,
-          currentDeviceId: data.current_device_id || data.currentDeviceId,
-          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
-          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
-        };
-      }
-    } catch (e) {}
-  }
-
-  // 2. Try Local registered users store fallback
-  const list = getLocalUsers();
-  return list.find(u => u.email && u.email.toLowerCase().trim() === cleanEmail) || null;
-}
-
-async function findUserById(id) {
-  if (!id) return null;
-  const strId = String(id).trim();
-
-  // 1. Try Supabase users table
-  if (supabaseServer) {
-    try {
-      const { data, error } = await supabaseServer
-        .from('users')
-        .select('*')
-        .eq('id', strId)
-        .maybeSingle();
-      if (!error && data) {
-        return {
-          ...data,
-          currentDeviceId: data.current_device_id || data.currentDeviceId,
-          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
-          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
-        };
-      }
-    } catch (e) {}
-  }
-
-  // 2. Try Local registered users store fallback
-  const list = getLocalUsers();
-  return list.find(u => String(u.id || u.sub).trim() === strId) || null;
-}
-
-// Subscription Orders Store Helper
-const ORDERS_FILE = path.join(__dirname, 'data', 'subscription-orders.json');
-
-function getSubscriptionOrders() {
-  try {
-    if (fs.existsSync(ORDERS_FILE)) {
-      const raw = fs.readFileSync(ORDERS_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) {}
-  return [];
-}
-
-function saveSubscriptionOrder(orderObj) {
-  try {
-    const list = getSubscriptionOrders();
-    const existingIdx = list.findIndex(o => o.order_id === orderObj.order_id);
-    if (existingIdx >= 0) {
-      list[existingIdx] = { ...list[existingIdx], ...orderObj, updated_at: new Date().toISOString() };
-    } else {
-      list.push({ ...orderObj, created_at: new Date().toISOString() });
-    }
-    fs.writeFileSync(ORDERS_FILE, JSON.stringify(list, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Error saving subscription order:', e.message);
-  }
-}
 
   // GET /api/auth/config (Public)
   app.get('/api/auth/config', (req, res) => {
@@ -1497,8 +1518,17 @@ function saveSubscriptionOrder(orderObj) {
 
   // POST /api/auth/logout (Protected User Logout)
   app.post('/api/auth/logout', requireAuthAndDevice, (req, res) => {
-    if (req.user?.id) {
-      kickoutUserSockets(req.user.id, null);
+    const uId = req.user?.id || req.user?.sub;
+    if (uId) {
+      const sockets = activeUserSockets.get(uId);
+      if (sockets) {
+        for (const s of sockets) {
+          try {
+            s.disconnect(true);
+          } catch (e) {}
+        }
+        activeUserSockets.delete(uId);
+      }
     }
     return res.json({ success: true, message: 'Logged out successfully' });
   });

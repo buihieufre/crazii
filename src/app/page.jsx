@@ -113,9 +113,19 @@ export default function TerminalPage() {
     return typeof window !== 'undefined' ? (localStorage.getItem('crazii_session_token') || '') : '';
   }, []);
 
+  const isLoggingOutRef = useRef(false);
+
   // Logout Handler
   const handleLogout = useCallback(async () => {
+    isLoggingOutRef.current = true;
     const token = getSessionToken();
+    if (socketRef.current) {
+      try {
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+      } catch (e) {}
+      socketRef.current = null;
+    }
     if (token) {
       try {
         await fetch('/api/auth/logout', {
@@ -130,30 +140,80 @@ export default function TerminalPage() {
     } catch (e) {}
     if (typeof window !== 'undefined') {
       localStorage.removeItem('crazii_session_token');
+      localStorage.removeItem('tradewh_session_token');
       localStorage.removeItem('crazii_user');
-    }
-    if (socketRef.current) {
-      try {
-        socketRef.current.removeAllListeners();
-        socketRef.current.disconnect();
-      } catch (e) {}
-      socketRef.current = null;
     }
     setCurrentUser(null);
     setIsAuthenticated(false);
     setWsStatus('disconnected');
+    setTimeout(() => {
+      isLoggingOutRef.current = false;
+    }, 1500);
   }, [getSessionToken]);
 
-  // Initial Auth Check on Mount (Supports Supabase Auth & Local Session)
+  // Initial Auth Check on Mount (Fast & Non-blocking with 1.5s Safety Timeout)
   useEffect(() => {
+    let isMounted = true;
+
+    // Safety timeout: Guarantee the loading overlay is dismissed after 1.5 seconds maximum
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) {
+        setIsCheckingAuth(false);
+      }
+    }, 1500);
+
     async function verifyAuth() {
       const token = typeof window !== 'undefined' ? localStorage.getItem('crazii_session_token') : null;
 
-      // 1. Try checking Supabase Auth session first
+      // 1. Try checking local App Session Token first (Instant & Fastest)
+      if (token) {
+        try {
+          const controller = new AbortController();
+          const reqTimeout = setTimeout(() => controller.abort(), 1200);
+
+          const res = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal: controller.signal
+          });
+          clearTimeout(reqTimeout);
+
+          if (res.ok) {
+            const data = await res.json();
+            if (isMounted) {
+              setCurrentUser(data.user);
+              setIsAuthenticated(true);
+              setIsCheckingAuth(false);
+              clearTimeout(safetyTimer);
+              return;
+            }
+          } else {
+            // Token invalid or session terminated by new device
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('crazii_session_token');
+              localStorage.removeItem('crazii_user');
+            }
+            if (isMounted) {
+              setIsAuthenticated(false);
+              setCurrentUser(null);
+            }
+          }
+        } catch (e) {
+          // Network error / abort
+          if (isMounted) {
+            setIsAuthenticated(false);
+            setCurrentUser(null);
+          }
+        }
+      }
+
+      // 2. Non-blocking Supabase Auth Session check fallback
       try {
         const supabase = createSupabaseClient();
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
+        const supaPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ data: {} }), 800));
+        
+        const { data: { session } } = await Promise.race([supaPromise, timeoutPromise]);
+        if (session?.user && isMounted) {
           const userObj = {
             sub: session.user.id,
             email: session.user.email,
@@ -166,41 +226,14 @@ export default function TerminalPage() {
           }
           setCurrentUser(userObj);
           setIsAuthenticated(true);
-          setIsCheckingAuth(false);
-          return;
         }
       } catch (supaErr) {
         console.warn('Supabase getSession error:', supaErr);
-      }
-
-      // 2. Fallback to Local Session Token check
-      if (!token) {
-        setIsAuthenticated(false);
-        setIsCheckingAuth(false);
-        return;
-      }
-
-      try {
-        const res = await fetch('/api/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setCurrentUser(data.user);
-          setIsAuthenticated(true);
-        } else {
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('crazii_session_token');
-            localStorage.removeItem('crazii_user');
-          }
-          setIsAuthenticated(false);
-          setCurrentUser(null);
-        }
-      } catch (e) {
-        setIsAuthenticated(false);
-        setCurrentUser(null);
       } finally {
-        setIsCheckingAuth(false);
+        if (isMounted) {
+          setIsCheckingAuth(false);
+          clearTimeout(safetyTimer);
+        }
       }
     }
 
@@ -210,7 +243,7 @@ export default function TerminalPage() {
     try {
       const supabase = createSupabaseClient();
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+        if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && isMounted) {
           const userObj = {
             sub: session.user.id,
             email: session.user.email,
@@ -228,9 +261,16 @@ export default function TerminalPage() {
       });
 
       return () => {
+        isMounted = false;
+        clearTimeout(safetyTimer);
         subscription?.unsubscribe();
       };
-    } catch (e) {}
+    } catch (e) {
+      return () => {
+        isMounted = false;
+        clearTimeout(safetyTimer);
+      };
+    }
   }, []);
 
   // Helper to subscribe visible slot codes on active socket connection
@@ -852,6 +892,7 @@ export default function TerminalPage() {
         });
 
         socket.on('force_logout', (data) => {
+          if (isLoggingOutRef.current) return;
           alert(data?.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
           handleLogout();
         });
@@ -871,6 +912,7 @@ export default function TerminalPage() {
         });
 
         socket.on('connect_error', (err) => {
+          if (isLoggingOutRef.current) return;
           if (err?.message && err.message.includes('DEVICE_SESSION_TERMINATED')) {
             alert('Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
             handleLogout();
