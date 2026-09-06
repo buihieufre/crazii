@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="cryptomus" content="88a0f467" />
   <title>TRADEWH.COM | Real-Time Live Streaming Chart Terminal</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="alternate icon" href="/favicon.ico">
@@ -16,7 +18,9 @@
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
 
   <style>
     :root {
@@ -78,8 +82,13 @@
     }
 
     @keyframes shimmer {
-      0% { background-position: 0% 0%; }
-      100% { background-position: 300% 0%; }
+      0% {
+        background-position: 0% 0%;
+      }
+
+      100% {
+        background-position: 300% 0%;
+      }
     }
 
     .auth-brand {
@@ -189,11 +198,6 @@
       background: rgba(255, 82, 82, 0.25);
       border-color: #ff5252;
       color: #ffffff;
-    }
-      --accent-green: #00E676;
-      --accent-cyan: #00E5FF;
-      --accent-orange: #FFA726;
-      --accent-magenta: #E040FB;
     }
 
     * {
@@ -350,9 +354,20 @@
     }
 
     @keyframes pulse {
-      0% { transform: scale(0.9); opacity: 0.7; }
-      50% { transform: scale(1.3); opacity: 1; }
-      100% { transform: scale(0.9); opacity: 0.7; }
+      0% {
+        transform: scale(0.9);
+        opacity: 0.7;
+      }
+
+      50% {
+        transform: scale(1.3);
+        opacity: 1;
+      }
+
+      100% {
+        transform: scale(0.9);
+        opacity: 0.7;
+      }
     }
 
     /* Timeframe Selector */
@@ -712,7 +727,7 @@
       font-weight: 700;
       padding: 1.5px 5px;
       border-radius: 3px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.6);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
       transform: translateY(-50%);
       white-space: nowrap;
       pointer-events: auto;
@@ -748,8 +763,13 @@
       border-radius: 2px;
     }
 
-    .swatch-yellow { background: var(--accent-yellow); }
-    .swatch-red { background: var(--accent-red); }
+    .swatch-yellow {
+      background: var(--accent-yellow);
+    }
+
+    .swatch-red {
+      background: var(--accent-red);
+    }
 
     /* Modal */
     .modal-overlay {
@@ -822,10 +842,13 @@
     }
 
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
   </style>
 </head>
+
 <body>
 
   <!-- Top Navigation Bar -->
@@ -852,7 +875,8 @@
       </div>
 
       <!-- Live Token Status Badge -->
-      <div class="token-status-pill" id="token-status-pill" onclick="openTokenModal()" title="Quản lý Token & Auto-Refresh">
+      <div class="token-status-pill" id="token-status-pill" onclick="openTokenModal()"
+        title="Quản lý Token & Auto-Refresh">
         <span class="live-dot" id="token-dot" style="width:5px; height:5px;"></span>
         <span id="token-status-label">Token: Đang kiểm tra...</span>
       </div>
@@ -878,7 +902,8 @@
       <!-- User Profile & Logout Section (Visible after authentication) -->
       <div id="user-header-section" class="user-header-section" style="display:none;">
         <div class="user-profile-chip" id="user-profile-chip" title="Tài khoản Google đã đăng nhập">
-          <img id="user-avatar-img" class="user-avatar" src="https://lh3.googleusercontent.com/a/default-user" alt="User" />
+          <img id="user-avatar-img" class="user-avatar" src="https://lh3.googleusercontent.com/a/default-user"
+            alt="User" />
           <span id="user-name-text" class="user-name">User</span>
         </div>
         <button class="btn btn-logout" onclick="handleLogout()" title="Đăng xuất khỏi hệ thống">
@@ -957,41 +982,49 @@
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
         <div style="background: #0f121a; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px;">
           <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">ACCESS TOKEN (15M)</div>
-          <div id="modal-access-status" style="font-size: 12px; font-weight: 700; margin-top: 2px; color: #00E676;">Active</div>
+          <div id="modal-access-status" style="font-size: 12px; font-weight: 700; margin-top: 2px; color: #00E676;">
+            Active</div>
           <div style="font-size: 9.5px; color: var(--text-muted); margin-top: 2px;">Tự gia hạn ngầm mỗi 12m 🔄</div>
         </div>
 
         <div style="background: #0f121a; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px;">
           <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">REFRESH TOKEN (3 DAYS)</div>
-          <div id="modal-refresh-status" style="font-size: 12px; font-weight: 700; margin-top: 2px; color: #00E5FF;">Active</div>
+          <div id="modal-refresh-status" style="font-size: 12px; font-weight: 700; margin-top: 2px; color: #00E5FF;">
+            Active</div>
           <div style="font-size: 9.5px; color: var(--text-muted); margin-top: 2px;">Cấp mới Access Token liên tục</div>
         </div>
       </div>
 
       <!-- Refresh Token Input Form -->
       <div style="margin-bottom: 12px;">
-        <label style="font-size: 11px; font-weight: 700; color: #ffffff; display: flex; justify-content: space-between;">
+        <label
+          style="font-size: 11px; font-weight: 700; color: #ffffff; display: flex; justify-content: space-between;">
           <span>🔑 TRADEWH Refresh Token (Hạn 3 Ngày)</span>
           <span style="color: var(--accent-green); font-size: 10px; font-weight: 700;">Khuyên dùng</span>
         </label>
         <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-top: 3px; margin-bottom: 6px;">
-          Dán mã Refresh Token (<code>typ: Refresh</code>) lấy từ hệ thống TRADEWH. Chỉ cần dán 1 lần duy nhất mỗi 3 ngày, server sẽ tự động cấp mới Access Token liên tục để biểu đồ không bao giờ bị dừng.
+          Dán mã Refresh Token (<code>typ: Refresh</code>) lấy từ hệ thống TRADEWH. Chỉ cần dán 1 lần duy nhất mỗi 3
+          ngày, server sẽ tự động cấp mới Access Token liên tục để biểu đồ không bao giờ bị dừng.
         </p>
-        <input type="text" id="refresh-token-input" class="input-field" style="margin-bottom: 6px;" placeholder="Dán mã Refresh Token mới tại đây..." />
+        <input type="text" id="refresh-token-input" class="input-field" style="margin-bottom: 6px;"
+          placeholder="Dán mã Refresh Token mới tại đây..." />
       </div>
 
-      <div id="token-modal-alert" style="display:none; font-size: 11px; padding: 6px 10px; border-radius: 4px; margin-bottom: 10px;"></div>
+      <div id="token-modal-alert"
+        style="display:none; font-size: 11px; padding: 6px 10px; border-radius: 4px; margin-bottom: 10px;"></div>
 
       <!-- Quick Action Buttons -->
       <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <button class="btn" id="btn-manual-refresh" onclick="triggerManualRefresh()" style="background: #1e283d; color: #90caf9; border-color: rgba(41, 98, 255, 0.4);">
+        <button class="btn" id="btn-manual-refresh" onclick="triggerManualRefresh()"
+          style="background: #1e283d; color: #90caf9; border-color: rgba(41, 98, 255, 0.4);">
           <span id="manual-refresh-icon">🔄</span>
           <span>Refresh Access Token Ngay</span>
         </button>
 
         <div style="display: flex; gap: 6px;">
           <button class="btn" onclick="closeTokenModal()">Đóng</button>
-          <button class="btn btn-primary" id="btn-save-token" onclick="saveRefreshTokenFromModal()">Lưu & Kích hoạt</button>
+          <button class="btn btn-primary" id="btn-save-token" onclick="saveRefreshTokenFromModal()">Lưu & Kích
+            hoạt</button>
         </div>
       </div>
     </div>
@@ -1003,7 +1036,8 @@
       <div class="auth-brand">TRADEWH<span>.COM</span></div>
       <div class="auth-tagline">Real-Time Live Streaming Chart Terminal</div>
       <p class="auth-desc">
-        Vui lòng đăng nhập bằng tài khoản Google để truy cập vào hệ thống dữ liệu biểu đồ, luồng stream WebSocket và chỉ báo kỹ thuật chuyên sâu.
+        Vui lòng đăng nhập bằng tài khoản Google để truy cập vào hệ thống dữ liệu biểu đồ, luồng stream WebSocket và chỉ
+        báo kỹ thuật chuyên sâu.
       </p>
 
       <div id="auth-alert-box" class="auth-alert-box"></div>
@@ -1143,7 +1177,7 @@
             const cfg = await cfgRes.json();
             clientId = cfg.clientId;
           }
-        } catch (e) {}
+        } catch (e) { }
 
         if (!clientId) {
           clientId = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
@@ -1216,12 +1250,12 @@
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
           });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       clearSessionData();
       if (localSocket) {
-        try { localSocket.close(); } catch (e) {}
+        try { localSocket.close(); } catch (e) { }
         localSocket = null;
       }
       showLoginOverlay('Bạn đã đăng xuất thành công.');
@@ -1467,7 +1501,7 @@
       for (const line of activePriceLines) {
         try {
           candleSeries.removePriceLine(line);
-        } catch (e) {}
+        } catch (e) { }
       }
       activePriceLines = [];
 
@@ -1776,7 +1810,7 @@
       if (!token) return;
 
       if (localSocket) {
-        try { localSocket.close(); } catch (e) {}
+        try { localSocket.close(); } catch (e) { }
       }
 
       localSocket = io({
@@ -2014,7 +2048,7 @@
 
       const closeEl = document.getElementById('ohlc-c');
       const prevPrice = parseFloat(closeEl.innerText);
-      
+
       // Update Close value and flash color
       closeEl.innerText = price.toFixed(2);
       if (!isNaN(prevPrice)) {
@@ -2031,7 +2065,7 @@
         currentLatestCandle.close = price;
         currentLatestCandle.high = Math.max(currentLatestCandle.high, price);
         currentLatestCandle.low = Math.min(currentLatestCandle.low, price);
-        
+
         // Recompute color if needed
         const isBull = currentLatestCandle.twbClose >= currentLatestCandle.twbOpen;
         currentLatestCandle.color = isBull ? BULLISH_COLOR : BEARISH_COLOR;
@@ -2082,7 +2116,7 @@
         } else {
           badge.classList.add('bearish');
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     function startBarCountdownTimer() {
@@ -2455,4 +2489,5 @@
     });
   </script>
 </body>
+
 </html>

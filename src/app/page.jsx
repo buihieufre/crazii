@@ -313,9 +313,30 @@ export default function TerminalPage() {
       });
 
       if (res.status === 401) {
+        const errorData = await res.json().catch(() => ({}));
+        if (errorData.code === 'DEVICE_SESSION_TERMINATED') {
+          alert('Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
+        }
         handleLogout();
         return;
       }
+
+      if (res.status === 403) {
+        const errorData = await res.json().catch(() => ({}));
+        if (errorData.code === 'SUBSCRIPTION_REQUIRED') {
+          if (!isSilent) {
+            setNotification({
+              type: 'error',
+              message: 'Tài khoản cần kích hoạt gói Subscription (45 USDT/tháng) để sử dụng biểu đồ.'
+            });
+          }
+          if (typeof window !== 'undefined' && window.location.pathname !== '/subscription') {
+            window.location.href = '/subscription';
+          }
+        }
+        return;
+      }
+
       const contentType = res.headers.get('content-type') || '';
 
       if (!contentType.includes('application/json')) {
@@ -830,6 +851,11 @@ export default function TerminalPage() {
           }
         });
 
+        socket.on('force_logout', (data) => {
+          alert(data?.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
+          handleLogout();
+        });
+
         socket.on('upstream_status', (status) => {
           if (status.connected) {
             setWsStatus('live');
@@ -845,6 +871,11 @@ export default function TerminalPage() {
         });
 
         socket.on('connect_error', (err) => {
+          if (err?.message && err.message.includes('DEVICE_SESSION_TERMINATED')) {
+            alert('Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.');
+            handleLogout();
+            return;
+          }
           console.warn('[Socket Connection Error]', err?.message);
           setWsStatus('cloud');
         });

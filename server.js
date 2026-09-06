@@ -24,6 +24,63 @@ const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || '').trim();
 const SESSION_SECRET = (process.env.SESSION_SECRET || 'crazii_jwt_session_secret_key_super_secure_2026').trim();
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID || undefined);
 
+// Cryptomus Payment Configuration
+const CRYPTOMUS_MERCHANT_ID = (process.env.CRYPTOMUS_MERCHANT_ID || '').trim();
+const CRYPTOMUS_PAYMENT_API_KEY = (process.env.CRYPTOMUS_PAYMENT_API_KEY || '').trim();
+
+// Admin Access Configuration
+const ADMIN_SECRET_KEY = (process.env.ADMIN_SECRET_KEY || 'tradewh_admin_secret_key_2026').trim();
+const ADMIN_EMAILS = [
+  'dhieu9b@gmail.com',
+  'buidinhhieu9b@gmail.com',
+  (process.env.ADMIN_EMAIL || '').toLowerCase().trim()
+].filter(Boolean);
+
+function isUserAdmin(user) {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase().trim();
+  return ADMIN_EMAILS.includes(email) || user.role === 'admin';
+}
+
+function isUserSubscriptionActive(user) {
+  if (!user) return false;
+  if (isUserAdmin(user)) return true;
+  if (user.subscriptionExpiry) {
+    const expiryTime = new Date(user.subscriptionExpiry).getTime();
+    return !isNaN(expiryTime) && expiryTime > Date.now();
+  }
+  return false;
+}
+
+// Active Sockets tracker for instant 0ms single-device kick-out
+const activeUserSockets = new Map(); // userId -> Set of clientSocket instances
+
+function kickoutUserSockets(userId, newDeviceId) {
+  if (!userId) return;
+  const sockets = activeUserSockets.get(userId);
+  if (sockets && sockets.size > 0) {
+    for (const s of sockets) {
+      if (s.deviceId !== newDeviceId) {
+        console.log(`[Single Device] ⚡ Forcefully logging out socket session for user ${userId}`);
+        try {
+          s.emit('force_logout', {
+            code: 'DEVICE_SESSION_TERMINATED',
+            message: 'Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.'
+          });
+          s.disconnect(true);
+        } catch (e) {}
+      }
+    }
+  }
+}
+
+// Cryptomus MD5 Signature Generator
+function generateCryptomusSignature(payload, apiKey) {
+  const jsonStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  const base64Data = Buffer.from(jsonStr).toString('base64');
+  return crypto.createHash('md5').update(base64Data + apiKey).digest('hex');
+}
+
 // Supabase Server Client Configuration
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://wlhlspmruezijcghgtqx.supabase.co';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_6Atv2XIec0c5qV75FTEWCg_gNLh7tDw';
@@ -46,14 +103,15 @@ async function recordUserLoginToSupabase(user, req) {
       email: user.email,
       name: user.name || user.email?.split('@')[0],
       avatar_url: user.avatar_url || user.picture || null,
+      current_device_id: user.currentDeviceId || null,
+      subscription_status: isUserSubscriptionActive(user),
+      subscription_expiry: user.subscriptionExpiry || null,
+      role: isUserAdmin(user) ? 'admin' : (user.role || 'user'),
       last_sign_in_at: nowIso,
     }, { onConflict: 'id' });
 
     if (uErr) {
       console.error(`[Supabase Sync] ❌ Failed to upsert to 'users': ${uErr.message} (Code: ${uErr.code})`);
-      if (uErr.code === '42501') {
-        console.warn(`[Supabase RLS Hint] ⚠️ Bảng 'users' đang bật Row Level Security (RLS). Hãy tắt RLS hoặc cấp quyền INSERT/UPDATE cho vai trò public/anon trong Supabase SQL Editor.`);
-      }
     } else {
       console.log(`[Supabase Sync] ✅ Synced user profile to 'users' table: ${user.email}`);
     }
@@ -73,9 +131,6 @@ async function recordUserLoginToSupabase(user, req) {
 
     if (lErr) {
       console.error(`[Supabase Sync] ❌ Failed to insert to 'user_logins': ${lErr.message} (Code: ${lErr.code})`);
-      if (lErr.code === '42501') {
-        console.warn(`[Supabase RLS Hint] ⚠️ Bảng 'user_logins' đang bật Row Level Security (RLS). Hãy tắt RLS hoặc cấp quyền INSERT cho vai trò public/anon trong Supabase SQL Editor.`);
-      }
     } else {
       console.log(`[Supabase Sync] ✅ Inserted login record to 'user_logins' table: ${user.email}`);
     }
@@ -85,15 +140,17 @@ async function recordUserLoginToSupabase(user, req) {
 }
 
 /**
- * Session Token Helpers (HMAC-SHA256 Signed JWT)
+ * Session Token Helpers (HMAC-SHA256 Signed JWT) with deviceId
  */
-function createSessionToken(user) {
+function createSessionToken(user, deviceId = null) {
+  const devId = deviceId || user.currentDeviceId || user.deviceId || crypto.randomUUID();
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const payload = Buffer.from(JSON.stringify({
-    sub: user.sub,
+    sub: user.id || user.sub,
     email: user.email,
     name: user.name,
-    picture: user.picture,
+    picture: user.avatar_url || user.picture || null,
+    deviceId: devId,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + (7 * 24 * 3600) // 7 days session
   })).toString('base64url');
@@ -134,6 +191,7 @@ async function verifyAnyToken(token) {
     if (!error && user) {
       return {
         sub: user.id,
+        id: user.id,
         email: user.email,
         name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'User',
         picture: user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
@@ -146,9 +204,9 @@ async function verifyAnyToken(token) {
 }
 
 /**
- * Express Authentication Middleware (Strict Google & Supabase Sign-In Barrier)
+ * Single Device Verification Middleware (Strict Session Kick-out)
  */
-async function requireAuth(req, res, next) {
+async function requireAuthAndDevice(req, res, next) {
   const authHeader = req.headers.authorization;
   const token = (authHeader && authHeader.startsWith('Bearer '))
     ? authHeader.slice(7).trim()
@@ -157,22 +215,84 @@ async function requireAuth(req, res, next) {
   if (!token) {
     return res.status(401).json({
       success: false,
+      code: 'UNAUTHORIZED',
       error: 'UNAUTHORIZED',
-      message: 'Authentication required. Please sign in with Google / Supabase.'
+      message: 'Yêu cầu đăng nhập để truy cập.'
     });
   }
 
-  const user = await verifyAnyToken(token);
+  const sessionPayload = verifySessionToken(token);
+  if (!sessionPayload) {
+    const sbUser = await verifyAnyToken(token);
+    if (!sbUser) {
+      return res.status(401).json({
+        success: false,
+        code: 'INVALID_SESSION',
+        error: 'INVALID_SESSION',
+        message: 'Phiên làm việc không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.'
+      });
+    }
+    const dbUser = (await findUserByEmail(sbUser.email)) || (await findUserById(sbUser.sub)) || sbUser;
+    req.user = dbUser;
+    return next();
+  }
+
+  const dbUser = (await findUserByEmail(sessionPayload.email)) || (await findUserById(sessionPayload.sub));
+  if (!dbUser) {
+    return res.status(401).json({
+      success: false,
+      code: 'USER_NOT_FOUND',
+      error: 'USER_NOT_FOUND',
+      message: 'Không tìm thấy tài khoản người dùng.'
+    });
+  }
+
+  // Enforce Single Device Limit
+  if (dbUser.currentDeviceId && sessionPayload.deviceId && dbUser.currentDeviceId !== sessionPayload.deviceId) {
+    return res.status(401).json({
+      success: false,
+      code: 'DEVICE_SESSION_TERMINATED',
+      error: 'DEVICE_SESSION_TERMINATED',
+      message: 'Tài khoản của bạn đã được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã kết thúc.'
+    });
+  }
+
+  req.user = {
+    ...dbUser,
+    sub: dbUser.id || dbUser.sub,
+    deviceId: sessionPayload.deviceId
+  };
+  next();
+}
+
+// Backward compatible alias
+const requireAuth = requireAuthAndDevice;
+
+/**
+ * Subscription Paywall Verification Middleware
+ */
+async function requireSubscription(req, res, next) {
+  const user = req.user;
   if (!user) {
     return res.status(401).json({
       success: false,
-      error: 'INVALID_SESSION',
-      message: 'Session is invalid or expired. Please sign in again.'
+      code: 'UNAUTHORIZED',
+      message: 'Yêu cầu đăng nhập.'
     });
   }
 
-  req.user = user;
-  next();
+  if (isUserSubscriptionActive(user)) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    code: 'SUBSCRIPTION_REQUIRED',
+    error: 'SUBSCRIPTION_REQUIRED',
+    message: 'Tài khoản của bạn chưa kích hoạt gói Subscription hoặc gói đã hết hạn (45 USDT/tháng). Vui lòng kích hoạt gói để tiếp tục sử dụng biểu đồ.',
+    subscriptionExpiry: user.subscriptionExpiry || null,
+    subscriptionStatus: false
+  });
 }
 
 /**
@@ -683,13 +803,77 @@ async function findUserByEmail(email) {
         .select('*')
         .ilike('email', cleanEmail)
         .maybeSingle();
-      if (!error && data) return data;
+      if (!error && data) {
+        return {
+          ...data,
+          currentDeviceId: data.current_device_id || data.currentDeviceId,
+          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
+          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
+        };
+      }
     } catch (e) {}
   }
 
   // 2. Try Local registered users store fallback
   const list = getLocalUsers();
   return list.find(u => u.email && u.email.toLowerCase().trim() === cleanEmail) || null;
+}
+
+async function findUserById(id) {
+  if (!id) return null;
+  const strId = String(id).trim();
+
+  // 1. Try Supabase users table
+  if (supabaseServer) {
+    try {
+      const { data, error } = await supabaseServer
+        .from('users')
+        .select('*')
+        .eq('id', strId)
+        .maybeSingle();
+      if (!error && data) {
+        return {
+          ...data,
+          currentDeviceId: data.current_device_id || data.currentDeviceId,
+          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : data.subscriptionStatus,
+          subscriptionExpiry: data.subscription_expiry || data.subscriptionExpiry,
+        };
+      }
+    } catch (e) {}
+  }
+
+  // 2. Try Local registered users store fallback
+  const list = getLocalUsers();
+  return list.find(u => String(u.id || u.sub).trim() === strId) || null;
+}
+
+// Subscription Orders Store Helper
+const ORDERS_FILE = path.join(__dirname, 'data', 'subscription-orders.json');
+
+function getSubscriptionOrders() {
+  try {
+    if (fs.existsSync(ORDERS_FILE)) {
+      const raw = fs.readFileSync(ORDERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveSubscriptionOrder(orderObj) {
+  try {
+    const list = getSubscriptionOrders();
+    const existingIdx = list.findIndex(o => o.order_id === orderObj.order_id);
+    if (existingIdx >= 0) {
+      list[existingIdx] = { ...list[existingIdx], ...orderObj, updated_at: new Date().toISOString() };
+    } else {
+      list.push({ ...orderObj, created_at: new Date().toISOString() });
+    }
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving subscription order:', e.message);
+  }
 }
 
   // GET /api/auth/config (Public)
@@ -764,6 +948,8 @@ async function findUserByEmail(email) {
     }
 
     const userId = 'usr_' + crypto.randomBytes(8).toString('hex');
+    const newDeviceId = crypto.randomUUID();
+
     const user = {
       sub: userId,
       id: userId,
@@ -771,7 +957,11 @@ async function findUserByEmail(email) {
       name: cleanEmail.split('@')[0],
       picture: null,
       password_hash: pending.passwordHash,
-      verified: true
+      verified: true,
+      currentDeviceId: newDeviceId,
+      subscriptionStatus: false,
+      subscriptionExpiry: null,
+      role: isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user'
     };
 
     saveLocalUser(user);
@@ -779,8 +969,8 @@ async function findUserByEmail(email) {
 
     pendingRegistrations.delete(cleanEmail);
 
-    const sessionToken = createSessionToken(user);
-    console.log(`[Email Auth] 🎉 New user registered & verified via OTP: ${cleanEmail}`);
+    const sessionToken = createSessionToken(user, newDeviceId);
+    console.log(`[Email Auth] 🎉 New user registered & verified via OTP: ${cleanEmail} (Device: ${newDeviceId})`);
 
     return res.json({
       success: true,
@@ -818,7 +1008,7 @@ async function findUserByEmail(email) {
     });
   });
 
-  // POST /api/auth/login-password (Standard Email + Password Login)
+  // POST /api/auth/login-password (Standard Email + Password Login with Single-Device Kick-out)
   app.post('/api/auth/login-password', async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || !password) {
@@ -849,19 +1039,37 @@ async function findUserByEmail(email) {
       return res.status(400).json({ success: false, message: 'Mật khẩu không chính xác.' });
     }
 
-    const user = {
-      sub: existingUser.id || existingUser.sub,
-      id: existingUser.id || existingUser.sub,
-      email: existingUser.email,
-      name: existingUser.name || existingUser.email.split('@')[0],
-      picture: existingUser.avatar_url || existingUser.picture || null
+    const userId = existingUser.id || existingUser.sub;
+    const newDeviceId = crypto.randomUUID();
+
+    // ⚡ Single-device kick-out: disconnect previous active sockets immediately
+    kickoutUserSockets(userId, newDeviceId);
+
+    const updatedUser = {
+      ...existingUser,
+      sub: userId,
+      id: userId,
+      currentDeviceId: newDeviceId,
+      last_sign_in_at: new Date().toISOString()
     };
 
-    saveLocalUser({ ...existingUser, last_sign_in_at: new Date().toISOString() });
-    recordUserLoginToSupabase(user, req);
+    saveLocalUser(updatedUser);
+    recordUserLoginToSupabase(updatedUser, req);
 
-    const sessionToken = createSessionToken(user);
-    console.log(`[Email Auth] 👤 User LOGGED IN: ${user.email}`);
+    const user = {
+      sub: userId,
+      id: userId,
+      email: existingUser.email,
+      name: existingUser.name || existingUser.email.split('@')[0],
+      picture: existingUser.avatar_url || existingUser.picture || null,
+      currentDeviceId: newDeviceId,
+      subscriptionStatus: isUserSubscriptionActive(updatedUser),
+      subscriptionExpiry: updatedUser.subscriptionExpiry || null,
+      role: isUserAdmin(updatedUser) ? 'admin' : (updatedUser.role || 'user')
+    };
+
+    const sessionToken = createSessionToken(user, newDeviceId);
+    console.log(`[Email Auth] 👤 User LOGGED IN: ${user.email} (New Device: ${newDeviceId})`);
 
     return res.json({
       success: true,
@@ -998,10 +1206,15 @@ async function findUserByEmail(email) {
       return res.status(400).json({ success: false, message: 'Không tìm thấy tài khoản người dùng.' });
     }
 
+    const userId = existingUser.id || existingUser.sub;
+    const newDeviceId = crypto.randomUUID();
+    kickoutUserSockets(userId, newDeviceId);
+
     const newHash = hashPassword(newPassword);
     const updatedUser = {
       ...existingUser,
       password_hash: newHash,
+      currentDeviceId: newDeviceId,
       last_sign_in_at: new Date().toISOString()
     };
 
@@ -1016,10 +1229,14 @@ async function findUserByEmail(email) {
       id: updatedUser.id || updatedUser.sub,
       email: updatedUser.email,
       name: updatedUser.name || updatedUser.email.split('@')[0],
-      picture: updatedUser.avatar_url || updatedUser.picture || null
+      picture: updatedUser.avatar_url || updatedUser.picture || null,
+      currentDeviceId: newDeviceId,
+      subscriptionStatus: isUserSubscriptionActive(updatedUser),
+      subscriptionExpiry: updatedUser.subscriptionExpiry || null,
+      role: isUserAdmin(updatedUser) ? 'admin' : (updatedUser.role || 'user')
     };
 
-    const sessionToken = createSessionToken(sessionUser);
+    const sessionToken = createSessionToken(sessionUser, newDeviceId);
     console.log(`[Magic Link Auth] 🔑 Password reset successfully for: ${cleanEmail}`);
 
     return res.json({
@@ -1110,10 +1327,15 @@ async function findUserByEmail(email) {
       return res.status(400).json({ success: false, message: 'Không tìm thấy tài khoản người dùng.' });
     }
 
+    const userId = existingUser.id || existingUser.sub;
+    const newDeviceId = crypto.randomUUID();
+    kickoutUserSockets(userId, newDeviceId);
+
     const newHash = hashPassword(newPassword);
     const updatedUser = {
       ...existingUser,
       password_hash: newHash,
+      currentDeviceId: newDeviceId,
       last_sign_in_at: new Date().toISOString()
     };
 
@@ -1127,10 +1349,14 @@ async function findUserByEmail(email) {
       id: updatedUser.id || updatedUser.sub,
       email: updatedUser.email,
       name: updatedUser.name || updatedUser.email.split('@')[0],
-      picture: updatedUser.avatar_url || updatedUser.picture || null
+      picture: updatedUser.avatar_url || updatedUser.picture || null,
+      currentDeviceId: newDeviceId,
+      subscriptionStatus: isUserSubscriptionActive(updatedUser),
+      subscriptionExpiry: updatedUser.subscriptionExpiry || null,
+      role: isUserAdmin(updatedUser) ? 'admin' : (updatedUser.role || 'user')
     };
 
-    const sessionToken = createSessionToken(sessionUser);
+    const sessionToken = createSessionToken(sessionUser, newDeviceId);
     console.log(`[Email Auth] 🔑 Password reset successfully for: ${cleanEmail}`);
 
     return res.json({
@@ -1210,25 +1436,39 @@ async function findUserByEmail(email) {
         });
       }
 
+      const userId = existingUser?.id || existingUser?.sub || payload.sub;
+      const newDeviceId = crypto.randomUUID();
+
+      // ⚡ Single-device kick-out: disconnect old socket session
+      kickoutUserSockets(userId, newDeviceId);
+
       const user = {
-        sub: payload.sub,
-        id: payload.sub,
+        sub: userId,
+        id: userId,
         email: email,
         name: payload.name || email.split('@')[0],
-        picture: payload.picture || null
+        picture: payload.picture || null,
+        currentDeviceId: newDeviceId,
+        subscriptionStatus: isUserSubscriptionActive(existingUser || {}),
+        subscriptionExpiry: existingUser?.subscriptionExpiry || null,
+        role: isUserAdmin({ email }) ? 'admin' : (existingUser?.role || 'user')
       };
 
       saveLocalUser({
         id: user.sub,
         email: user.email,
         name: user.name,
-        avatar_url: user.picture
+        avatar_url: user.picture,
+        currentDeviceId: newDeviceId,
+        subscriptionStatus: user.subscriptionStatus,
+        subscriptionExpiry: user.subscriptionExpiry,
+        role: user.role
       });
       recordUserLoginToSupabase(user, req);
 
-      const sessionToken = createSessionToken(user);
+      const sessionToken = createSessionToken(user, newDeviceId);
       const isNewUser = !existingUser;
-      console.log(`[Google Auth] 👤 User ${isNewUser ? 'REGISTERED' : 'LOGGED IN'}: ${user.email} (${user.name})`);
+      console.log(`[Google Auth] 👤 User ${isNewUser ? 'REGISTERED' : 'LOGGED IN'}: ${user.email} (${user.name}) (Device: ${newDeviceId})`);
 
       return res.json({
         success: true,
@@ -1248,7 +1488,7 @@ async function findUserByEmail(email) {
   });
 
   // GET /api/auth/me (Protected User Profile)
-  app.get('/api/auth/me', requireAuth, (req, res) => {
+  app.get('/api/auth/me', requireAuthAndDevice, (req, res) => {
     return res.json({
       success: true,
       user: req.user
@@ -1256,8 +1496,281 @@ async function findUserByEmail(email) {
   });
 
   // POST /api/auth/logout (Protected User Logout)
-  app.post('/api/auth/logout', requireAuth, (req, res) => {
+  app.post('/api/auth/logout', requireAuthAndDevice, (req, res) => {
+    if (req.user?.id) {
+      kickoutUserSockets(req.user.id, null);
+    }
     return res.json({ success: true, message: 'Logged out successfully' });
+  });
+
+  // ==========================================
+  // SUBSCRIPTION, PAYMENT & ADMIN TRIAL ROUTES
+  // ==========================================
+
+  // GET /api/user/subscription (Get current user subscription details)
+  app.get('/api/user/subscription', requireAuthAndDevice, async (req, res) => {
+    const user = req.user;
+    const dbUser = (await findUserByEmail(user.email)) || (await findUserById(user.id || user.sub)) || user;
+    const isAdmin = isUserAdmin(dbUser);
+    const isActive = isUserSubscriptionActive(dbUser);
+
+    let daysLeft = 0;
+    if (dbUser.subscriptionExpiry) {
+      const diffMs = new Date(dbUser.subscriptionExpiry).getTime() - Date.now();
+      daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+    }
+
+    return res.json({
+      success: true,
+      subscriptionStatus: isActive,
+      subscriptionExpiry: dbUser.subscriptionExpiry || null,
+      daysLeft: isAdmin ? 9999 : daysLeft,
+      isAdmin: isAdmin,
+      role: isAdmin ? 'admin' : (dbUser.role || 'user'),
+      email: dbUser.email,
+      name: dbUser.name
+    });
+  });
+
+  // POST /api/payment/create (Create Cryptomus 45 USDT invoice)
+  app.post('/api/payment/create', requireAuthAndDevice, async (req, res) => {
+    const user = req.user;
+    const userId = user.id || user.sub;
+    const orderId = `SUB_${userId}_${Date.now()}`;
+    const reqProto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const reqHost = req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`;
+    const baseUrl = `${reqProto}://${reqHost}`;
+
+    const payload = {
+      amount: "45.00",
+      currency: "USDT",
+      order_id: orderId,
+      url_return: `${baseUrl}/subscription?order_id=${orderId}&status=success`,
+      url_callback: `${baseUrl}/api/payment/webhook`,
+      is_payment_multiple: false,
+      lifetime: 3600,
+      additional_data: JSON.stringify({ userId: userId, email: user.email })
+    };
+
+    if (CRYPTOMUS_MERCHANT_ID && CRYPTOMUS_PAYMENT_API_KEY) {
+      try {
+        const sign = generateCryptomusSignature(payload, CRYPTOMUS_PAYMENT_API_KEY);
+        console.log(`[Cryptomus] 💳 Creating invoice for user ${user.email} (Order: ${orderId})...`);
+
+        const response = await fetch('https://api.cryptomus.com/v1/payment', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'merchant': CRYPTOMUS_MERCHANT_ID,
+            'sign': sign
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data && data.result && data.result.url) {
+          saveSubscriptionOrder({
+            order_id: orderId,
+            user_id: userId,
+            email: user.email,
+            amount: "45.00",
+            currency: "USDT",
+            status: 'pending',
+            payment_url: data.result.url,
+            cryptomus_uuid: data.result.uuid
+          });
+
+          return res.json({
+            success: true,
+            orderId: orderId,
+            paymentUrl: data.result.url,
+            uuid: data.result.uuid
+          });
+        } else {
+          console.error('[Cryptomus Create Error]', data);
+          return res.status(400).json({
+            success: false,
+            message: data.message || 'Không thể tạo đơn hàng trên Cryptomus',
+            raw: data
+          });
+        }
+      } catch (err) {
+        console.error('[Cryptomus API Exception]', err.message);
+        return res.status(500).json({ success: false, message: 'Lỗi kết nối cổng thanh toán Cryptomus', error: err.message });
+      }
+    } else {
+      // Fallback Demo / Simulated Payment Flow for development & testing
+      const mockUrl = `https://pay.cryptomus.com/pay/mock_${orderId}`;
+      saveSubscriptionOrder({
+        order_id: orderId,
+        user_id: userId,
+        email: user.email,
+        amount: "45.00",
+        currency: "USDT",
+        status: 'pending',
+        payment_url: mockUrl,
+        is_mock: true
+      });
+
+      return res.json({
+        success: true,
+        orderId: orderId,
+        paymentUrl: mockUrl,
+        is_mock: true,
+        message: 'Chế độ mô phỏng Cryptomus (chưa cấu hình API Key)'
+      });
+    }
+  });
+
+  // POST /api/payment/webhook (Cryptomus IPN Payment Callback)
+  app.post('/api/payment/webhook', async (req, res) => {
+    try {
+      const incomingSign = req.headers['sign'];
+      const body = req.body;
+
+      if (!body) {
+        return res.status(400).json({ success: false, message: 'Missing body' });
+      }
+
+      // Verify signature if key is configured
+      if (CRYPTOMUS_PAYMENT_API_KEY) {
+        const payloadToSign = { ...body };
+        delete payloadToSign.sign;
+        const expectedSign = generateCryptomusSignature(payloadToSign, CRYPTOMUS_PAYMENT_API_KEY);
+
+        if (incomingSign !== expectedSign && body.sign !== expectedSign) {
+          console.warn(`[Cryptomus Webhook] ❌ Invalid signature received: ${incomingSign}`);
+          return res.status(400).json({ success: false, message: 'Invalid signature' });
+        }
+      }
+
+      const { status, order_id, additional_data } = body;
+      console.log(`[Cryptomus Webhook] 📥 Received webhook for Order ${order_id} with status: ${status}`);
+
+      if (status === 'paid' || status === 'paid_over' || status === 'paid_simulated') {
+        let meta = {};
+        try {
+          meta = typeof additional_data === 'string' ? JSON.parse(additional_data) : (additional_data || {});
+        } catch (e) {}
+
+        const userId = meta.userId;
+        const email = meta.email;
+
+        let targetUser = (await findUserById(userId)) || (await findUserByEmail(email));
+        if (!targetUser && userId) {
+          targetUser = { id: userId, email: email || 'user@tradewh.com' };
+        }
+
+        if (targetUser) {
+          const currentExpiryTime = targetUser.subscriptionExpiry ? new Date(targetUser.subscriptionExpiry).getTime() : 0;
+          const nowTime = Date.now();
+          // Add +30 days (either from now or stacked onto current valid expiry)
+          const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
+          const newExpiry = new Date(baseTime + (30 * 24 * 3600 * 1000)).toISOString();
+
+          const updated = {
+            ...targetUser,
+            subscriptionStatus: true,
+            subscriptionExpiry: newExpiry
+          };
+
+          saveLocalUser(updated);
+          recordUserLoginToSupabase(updated, req);
+
+          saveSubscriptionOrder({
+            order_id: order_id,
+            user_id: targetUser.id || targetUser.sub,
+            email: targetUser.email,
+            status: status,
+            amount: body.amount || "45.00",
+            currency: body.currency || "USDT",
+            paid_at: new Date().toISOString()
+          });
+
+          console.log(`[Cryptomus Webhook] 🎉 Subscription ACTIVATED for ${targetUser.email} until ${newExpiry}`);
+        }
+      }
+
+      return res.json({ success: true, message: 'Webhook processed' });
+    } catch (err) {
+      console.error('[Cryptomus Webhook Error]', err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // GET /api/payment/status/:orderId (Check order status)
+  app.get('/api/payment/status/:orderId', requireAuthAndDevice, (req, res) => {
+    const { orderId } = req.params;
+    const orders = getSubscriptionOrders();
+    const order = orders.find(o => o.order_id === orderId);
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng' });
+    }
+
+    return res.json({
+      success: true,
+      order
+    });
+  });
+
+  // POST /api/admin/grant-trial (Admin 3-Day Trial Feature)
+  app.post('/api/admin/grant-trial', requireAuthAndDevice, async (req, res) => {
+    const requester = req.user;
+    const adminKey = req.headers['x-admin-key'];
+    const isAdmin = isUserAdmin(requester) || adminKey === ADMIN_SECRET_KEY;
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN',
+        message: 'Bạn không có quyền thực hiện tính năng quản trị này.'
+      });
+    }
+
+    const { email, userId, days = 3 } = req.body || {};
+    if (!email && !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng cung cấp email hoặc userId của tài khoản cần cấp trial.'
+      });
+    }
+
+    let targetUser = (email ? await findUserByEmail(email) : null) || (userId ? await findUserById(userId) : null);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy người dùng với ${email ? 'email: ' + email : 'userId: ' + userId}`
+      });
+    }
+
+    const trialDurationMs = Number(days) * 24 * 3600 * 1000;
+    const currentExpiryTime = targetUser.subscriptionExpiry ? new Date(targetUser.subscriptionExpiry).getTime() : 0;
+    const nowTime = Date.now();
+    const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
+    const newExpiry = new Date(baseTime + trialDurationMs).toISOString();
+
+    const updatedUser = {
+      ...targetUser,
+      subscriptionStatus: true,
+      subscriptionExpiry: newExpiry
+    };
+
+    saveLocalUser(updatedUser);
+    recordUserLoginToSupabase(updatedUser, req);
+
+    console.log(`[Admin Trial] 🎁 Admin ${requester.email} granted ${days}-day trial to ${targetUser.email} until ${newExpiry}`);
+
+    return res.json({
+      success: true,
+      message: `Đã cấp ${days} ngày dùng thử thành công cho ${targetUser.email}!`,
+      user: {
+        id: updatedUser.id || updatedUser.sub,
+        email: updatedUser.email,
+        subscriptionStatus: true,
+        subscriptionExpiry: newExpiry
+      }
+    });
   });
 
   // REST API: /api/token-info (Protected Safe metadata query without exposing raw tokens)
@@ -1410,8 +1923,8 @@ async function findUserByEmail(email) {
     return res.json({ success: true, message: 'Đã xóa toàn bộ lịch sử lệnh!' });
   });
 
-  // REST API: /api/candles (Protected Reverse Proxy)
-  app.get('/api/candles', requireAuth, async (req, res) => {
+  // REST API: /api/candles (Protected Reverse Proxy with Subscription Paywall)
+  app.get('/api/candles', requireAuthAndDevice, requireSubscription, async (req, res) => {
     const code = req.query.code || 'XAUUSD.ca_5';
     const targetUrl = `https://sale-api.crazii.com/api/v1/chart/candle?code=${encodeURIComponent(code)}`;
 
@@ -1681,25 +2194,53 @@ async function findUserByEmail(email) {
     }
   }, 15000);
 
-  // Socket.IO Strict Session Authentication Middleware (Google & Supabase Auth)
+  // Socket.IO Strict Session Authentication & Single-Device Limit Middleware
   io.use(async (socket, next) => {
     const token = socket.handshake.auth?.sessionToken || socket.handshake.query?.sessionToken;
     if (!token) {
       console.warn(`[Socket Auth] ❌ Rejected unauthenticated socket connection (missing sessionToken)`);
-      return next(new Error('UNAUTHORIZED: Authentication required. Please sign in with Google / Supabase.'));
+      return next(new Error('UNAUTHORIZED: Authentication required.'));
     }
-    const user = await verifyAnyToken(token);
-    if (!user) {
+
+    const sessionPayload = verifySessionToken(token);
+    if (sessionPayload) {
+      const dbUser = (await findUserByEmail(sessionPayload.email)) || (await findUserById(sessionPayload.sub));
+      if (dbUser) {
+        if (dbUser.currentDeviceId && sessionPayload.deviceId && dbUser.currentDeviceId !== sessionPayload.deviceId) {
+          console.warn(`[Socket Auth] ❌ Rejected socket connection due to device mismatch: ${sessionPayload.email}`);
+          return next(new Error('DEVICE_SESSION_TERMINATED: Logged in from another device.'));
+        }
+        socket.user = dbUser;
+        socket.userId = dbUser.id || dbUser.sub;
+        socket.deviceId = sessionPayload.deviceId;
+        console.log(`[Socket Auth] 👤 Socket connected for: ${dbUser.email} (Device: ${sessionPayload.deviceId})`);
+        return next();
+      }
+    }
+
+    const anyUser = await verifyAnyToken(token);
+    if (!anyUser) {
       console.warn(`[Socket Auth] ❌ Rejected unauthenticated socket connection (invalid sessionToken)`);
       return next(new Error('UNAUTHORIZED: Invalid or expired sessionToken'));
     }
-    socket.user = user;
-    console.log(`[Socket Auth] 👤 Socket connection authenticated for: ${user.email}`);
+
+    socket.user = anyUser;
+    socket.userId = anyUser.id || anyUser.sub;
+    socket.deviceId = anyUser.deviceId || null;
+    console.log(`[Socket Auth] 👤 Socket connection authenticated for: ${anyUser.email}`);
     next();
   });
 
-  // Local Frontend Socket.IO Connections (On-Demand)
+  // Local Frontend Socket.IO Connections (Single-Device Tracker)
   io.on('connection', (clientSocket) => {
+    const uId = clientSocket.userId;
+    if (uId) {
+      if (!activeUserSockets.has(uId)) {
+        activeUserSockets.set(uId, new Set());
+      }
+      activeUserSockets.get(uId).add(clientSocket);
+    }
+
     clientSocket.emit('upstream_status', {
       connected: isUpstreamConnected,
       timestamp: Date.now()
@@ -1731,6 +2272,13 @@ async function findUserByEmail(email) {
     });
 
     clientSocket.on('disconnect', () => {
+      if (uId && activeUserSockets.has(uId)) {
+        activeUserSockets.get(uId).delete(clientSocket);
+        if (activeUserSockets.get(uId).size === 0) {
+          activeUserSockets.delete(uId);
+        }
+      }
+
       setTimeout(() => {
         if (io.sockets.sockets.size === 0) {
           disconnectUpstreamWebSocket();

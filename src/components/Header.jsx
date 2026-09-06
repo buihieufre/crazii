@@ -353,6 +353,26 @@ export default function Header({
         */}
 
 
+        {/* Subscription / Plan Button */}
+        <Link
+          href="/subscription"
+          className="btn"
+          style={{
+            textDecoration: 'none',
+            background: 'rgba(203, 177, 147, 0.1)',
+            borderColor: 'rgba(203, 177, 147, 0.4)',
+            color: '#CBB193',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            fontWeight: '600'
+          }}
+          title="Quản lý Gói Cước & Đăng Ký (45 USDT/tháng)"
+        >
+          <span>💎</span>
+          <span>Gói Cước</span>
+        </Link>
+
         {/* Fullscreen Toggle Button */}
         <button
           className="btn"
