@@ -10,6 +10,7 @@ function SubscriptionContent() {
   const searchParams = useSearchParams();
   const queryOrderId = searchParams ? searchParams.get('order_id') : null;
   const queryStatus = searchParams ? searchParams.get('status') : null;
+  const queryNPId = searchParams ? searchParams.get('NP_id') : null;
 
   const [user, setUser] = useState(null);
   const [subData, setSubData] = useState(null);
@@ -18,6 +19,12 @@ function SubscriptionContent() {
   const [paymentInfo, setPaymentInfo] = useState(null);
   const [pollCount, setPollCount] = useState(0);
   const [message, setMessage] = useState(null);
+  const [simulating, setSimulating] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+
+  // Network & Price Selection States (Default USDT on BSC with $1.00 Test Price)
+  const [selectedNetwork, setSelectedNetwork] = useState('bsc'); // 'bsc' (BEP-20) or 'eth' (ERC-20)
+  const [selectedPrice, setSelectedPrice] = useState('1.00'); // '1.00' (test) or '15.00' (standard)
 
   // Admin Tool 1: Random Trial Generator state
   const [genDays, setGenDays] = useState(3);
@@ -35,9 +42,6 @@ function SubscriptionContent() {
   const [adminDays, setAdminDays] = useState(3);
   const [adminMsg, setAdminMsg] = useState(null);
   const [adminLoading, setAdminLoading] = useState(false);
-
-  // Admin Tool 3: Collapsible payment test
-  const [showAdminPaymentTest, setShowAdminPaymentTest] = useState(false);
 
   // Retrieve session token from localStorage
   function getSessionToken() {
@@ -113,16 +117,49 @@ function SubscriptionContent() {
     fetchSubscriptionData();
   }, []);
 
-  // Handle auto query check if returned from Cryptomus payment gateway
+  // Handle auto query check if returned from NOWPayments payment gateway
   useEffect(() => {
-    if (queryStatus === 'success' || queryOrderId) {
+    if (queryStatus === 'success') {
+      const targetOrderId = queryOrderId || queryNPId;
+      if (targetOrderId) {
+        setMessage({
+          type: 'info',
+          text: '🔄 Đang xác nhận giao dịch thanh toán từ NOWPayments...'
+        });
+
+        const token = getSessionToken();
+        fetch(`/api/payment/status/${targetOrderId}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && (data.activated || data.order?.status === 'finished' || data.order?.status === 'confirmed')) {
+              setMessage({
+                type: 'success',
+                text: '🎉 Giao dịch thành công! Gói thành viên Pro đã được kích hoạt (+30 ngày).'
+              });
+              fetchSubscriptionData();
+            } else {
+              setMessage({
+                type: 'info',
+                text: 'Giao dịch đang chờ xác nhận từ mạng blockchain. Vui lòng đợi trong giây lát...'
+              });
+              fetchSubscriptionData();
+            }
+          })
+          .catch(err => {
+            fetchSubscriptionData();
+          });
+      } else {
+        fetchSubscriptionData();
+      }
+    } else if (queryStatus === 'cancel') {
       setMessage({
-        type: 'success',
-        text: 'Cảm ơn bạn đã thanh toán! Hệ thống đang tự động đồng bộ thời hạn gói...'
+        type: 'info',
+        text: 'Đơn hàng thanh toán đã bị tạm dừng hoặc hủy. Bạn có thể tiến hành tạo lại bất kỳ lúc nào.'
       });
-      fetchSubscriptionData();
     }
-  }, [queryStatus, queryOrderId]);
+  }, [queryStatus, queryOrderId, queryNPId]);
 
   // Copy to clipboard helper
   function handleCopyText(text, key) {
@@ -253,7 +290,7 @@ function SubscriptionContent() {
     }
   }
 
-  // Create Cryptomus Payment Invoice (45.00 USDT)
+  // Create NOWPayments Crypto Invoice with selected Network (BSC or ETH) and Price ($1 or $15)
   async function handleCreatePayment() {
     const token = getSessionToken();
     if (!token) {
@@ -264,47 +301,148 @@ function SubscriptionContent() {
     setPaying(true);
     setMessage(null);
 
+    const networkName = selectedNetwork === 'eth' ? 'ETH (ERC-20)' : 'BSC (BEP-20)';
+    const effectivePrice = (selectedNetwork === 'eth' && selectedPrice === '1.00') ? '2.00' : selectedPrice;
+
     try {
-      const res = await fetch('/api/payment/create', {
+      const res = await fetch('/api/payment/create-invoice', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
-        }
+        },
+        body: JSON.stringify({
+          amount: effectivePrice,
+          currency: "usd",
+          network: selectedNetwork
+        })
       });
 
       const data = await res.json();
-      if (data.success && data.paymentUrl) {
-        setPaymentInfo(data);
-        window.open(data.paymentUrl, '_blank', 'noopener,noreferrer');
+      if (data.success && (data.invoiceUrl || data.paymentUrl)) {
+        const url = data.invoiceUrl || data.paymentUrl;
+        setPaymentInfo({
+          ...data,
+          networkName,
+          selectedPrice: data.amount || effectivePrice
+        });
+        window.open(url, '_blank', 'noopener,noreferrer');
         setMessage({
           type: 'info',
-          text: `Đã mở trang thanh toán Cryptomus. Sau khi hoàn tất chuyển khoản 45 USDT, gói cước sẽ tự động kích hoạt!`
+          text: `Đã mở trang thanh toán USDT mạng ${networkName} ($${data.amount || effectivePrice}). Sau khi hoàn tất chuyển khoản, gói cước sẽ tự động kích hoạt +30 ngày!`
         });
 
+        // Polling status every 4 seconds
         let count = 0;
         const interval = setInterval(async () => {
           count++;
           setPollCount(count);
-          if (count > 24) {
+          if (count > 45) {
             clearInterval(interval);
             return;
           }
+
+          if (data.orderId) {
+            try {
+              const statusRes = await fetch(`/api/payment/status/${data.orderId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              const statusData = await statusRes.json();
+              if (statusData.activated || statusData.order?.status === 'finished' || statusData.order?.status === 'confirmed') {
+                clearInterval(interval);
+                setMessage({
+                  type: 'success',
+                  text: '🎉 Thanh toán thành công! Gói thành viên TRADEWH Pro đã được kích hoạt (+30 ngày).'
+                });
+                await fetchSubscriptionData();
+                return;
+              }
+            } catch (e) {}
+          }
+
           await fetchSubscriptionData();
-        }, 5000);
+        }, 4000);
       } else {
         setMessage({
           type: 'error',
-          text: data.message || 'Không thể tạo đơn hàng thanh toán. Vui lòng thử lại sau.'
+          text: data.message || 'Không thể tạo hóa đơn thanh toán NOWPayments. Vui lòng thử lại sau.'
         });
       }
     } catch (err) {
       setMessage({
         type: 'error',
-        text: 'Lỗi kết nối tới máy chủ thanh toán: ' + err.message
+        text: 'Lỗi kết nối máy chủ thanh toán: ' + err.message
       });
     } finally {
       setPaying(false);
+    }
+  }
+
+  // Active status check & sync with NOWPayments
+  async function handleCheckPaymentStatus() {
+    if (!paymentInfo?.orderId) return;
+    const token = getSessionToken();
+    setCheckingStatus(true);
+    setMessage(null);
+
+    try {
+      const res = await fetch(`/api/payment/status/${paymentInfo.orderId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (data.success && (data.activated || data.order?.status === 'finished' || data.order?.status === 'confirmed')) {
+        setMessage({
+          type: 'success',
+          text: `🎉 Xác nhận thanh toán thành công! Gói Pro đã kích hoạt +30 ngày.`
+        });
+        await fetchSubscriptionData();
+      } else {
+        setMessage({
+          type: 'info',
+          text: `Trạng thái hiện tại: [${data.order?.status || 'pending'}]. Nếu bạn vừa chuyển tiền, vui lòng chờ 1-2 phút để mạng blockchain xác nhận giao dịch.`
+        });
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Lỗi kiểm tra trạng thái: ' + err.message });
+    } finally {
+      setCheckingStatus(false);
+    }
+  }
+
+  // Simulate Payment Confirmation (for testing)
+  async function handleSimulateConfirm() {
+    if (!paymentInfo?.orderId) return;
+    const token = getSessionToken();
+    setSimulating(true);
+
+    try {
+      const res = await fetch('/api/payment/simulate-confirm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          orderId: paymentInfo.orderId
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setMessage({
+          type: 'success',
+          text: `⚡ Đã mô phỏng thanh toán thành công! Gói Pro đã được gia hạn +30 ngày.`
+        });
+        await fetchSubscriptionData();
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Lỗi mô phỏng thanh toán.' });
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Lỗi: ' + err.message });
+    } finally {
+      setSimulating(false);
     }
   }
 
@@ -314,8 +452,8 @@ function SubscriptionContent() {
   const expiryDateFormatted = subData?.subscriptionExpiry
     ? new Date(subData.subscriptionExpiry).toLocaleDateString('vi-VN', {
         year: 'numeric',
-        month: 'long',
-        day: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
         hour: '2-digit',
         minute: '2-digit'
       })
@@ -324,104 +462,101 @@ function SubscriptionContent() {
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: '#0b0e14',
+      backgroundColor: '#0B0E14',
       color: '#E9E6E7',
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      padding: '30px 20px 60px 20px',
+      padding: '24px 16px 64px 16px',
       position: 'relative',
       overflowX: 'hidden'
     }}>
-      {/* Background Decorative Mesh Glow */}
+      {/* Background Subtle Geometric Grid Overlay */}
       <div style={{
         position: 'absolute',
-        top: '-150px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '900px',
-        height: '500px',
-        background: 'radial-gradient(circle, rgba(203, 177, 147, 0.08) 0%, rgba(11, 14, 20, 0) 70%)',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundImage: `
+          linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px)
+        `,
+        backgroundSize: '40px 40px',
         pointerEvents: 'none',
         zIndex: 0
       }} />
 
-      {/* Top Navigation Bar */}
+      {/* Top Header Navigation */}
       <header style={{
         width: '100%',
-        maxWidth: '1080px',
+        maxWidth: '1040px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '36px',
+        paddingBottom: '20px',
+        marginBottom: '28px',
+        borderBottom: '1px solid #1A202C',
         zIndex: 1
       }}>
-        <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{
             background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
             color: '#0B0E14',
             fontWeight: '900',
-            fontSize: '14px',
+            fontSize: '13px',
             letterSpacing: '2px',
-            padding: '6px 14px',
-            borderRadius: '2px',
-            boxShadow: '0 2px 10px rgba(203, 177, 147, 0.2)'
+            padding: '5px 12px',
+            borderRadius: '2px'
           }}>
             TRADEWH
           </div>
+          <span style={{ fontSize: '12px', color: '#6B7C98', fontWeight: '600', letterSpacing: '1px' }}>
+            TERMINAL // BILLING
+          </span>
         </Link>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {/* User Profile Badge */}
+          {/* User Identifier */}
           {(subData?.email || user?.email) && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '5px 12px 5px 6px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '20px',
-                fontSize: '12px',
-                fontWeight: '600',
-                color: '#E9E6E7'
-              }}
-              title={subData?.email || user?.email}
-            >
-              <img
-                src={user?.picture || 'https://lh3.googleusercontent.com/a/default-user'}
-                alt="Avatar"
-                style={{ width: '20px', height: '20px', borderRadius: '50%', objectFit: 'cover' }}
-                onError={(e) => { e.currentTarget.src = 'https://lh3.googleusercontent.com/a/default-user'; }}
-              />
-              <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {subData?.name || user?.name || (subData?.email || user?.email)?.split('@')[0]}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '4px 10px',
+              background: '#121620',
+              border: '1px solid #222938',
+              borderRadius: '2px',
+              fontSize: '12px',
+              color: '#E9E6E7'
+            }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isActive ? '#22C55E' : '#EF4444' }} />
+              <span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {subData?.email || user?.email}
               </span>
             </div>
           )}
 
-          {/* Back to Terminal Link */}
+          {/* Return To Terminal */}
           <Link
             href="/"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '8px 16px',
-              background: '#131722',
+              padding: '7px 14px',
+              background: '#121620',
               color: '#E9E6E7',
-              border: '1px solid #252a38',
-              borderRadius: '4px',
-              fontSize: '13px',
+              border: '1px solid #222938',
+              borderRadius: '2px',
+              fontSize: '12px',
               fontWeight: '600',
-              textDecoration: 'none',
-              transition: 'all 0.2s ease'
+              textDecoration: 'none'
             }}
           >
             <span>📊</span>
-            <span>Quay lại Terminal</span>
+            <span>Terminal</span>
           </Link>
 
           {/* Logout Button */}
@@ -431,116 +566,62 @@ function SubscriptionContent() {
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '8px 14px',
-              background: 'rgba(239, 68, 68, 0.1)',
-              color: '#f87171',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: '4px',
-              fontSize: '13px',
+              padding: '7px 12px',
+              background: 'rgba(239, 68, 68, 0.08)',
+              color: '#F87171',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderRadius: '2px',
+              fontSize: '12px',
               fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
+              cursor: 'pointer'
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.2)';
-              e.currentTarget.style.color = '#ffffff';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-              e.currentTarget.style.color = '#f87171';
-            }}
-            title="Đăng xuất khỏi phiên làm việc"
           >
-            <span>🚪</span>
             <span>Đăng xuất</span>
           </button>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main style={{ width: '100%', maxWidth: '980px', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      {/* Main Container */}
+      <main style={{ width: '100%', maxWidth: '1040px', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         
-        {/* Title Header */}
-        <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '4px 14px',
-            background: 'rgba(203, 177, 147, 0.1)',
-            border: '1px solid rgba(203, 177, 147, 0.3)',
-            borderRadius: '20px',
-            fontSize: '12px',
-            fontWeight: '600',
-            color: '#CBB193',
-            marginBottom: '14px',
-            letterSpacing: '0.5px'
-          }}>
-            <span>{isAdmin ? '👑 ADMIN CONTROL CENTER' : '💎 TRADEWH MEMBERSHIP'}</span>
-          </div>
-
-          <h1 style={{
-            fontSize: '32px',
-            fontWeight: '800',
-            letterSpacing: '-0.5px',
-            margin: '0 0 10px 0',
-            background: 'linear-gradient(180deg, #FFFFFF 0%, #CBB193 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent'
-          }}>
-            {isAdmin ? 'Trung Tâm Quản Trị & Cấp Quyền Dùng Thử' : 'Trạng Thái Tài Khoản Thành Viên'}
-          </h1>
-
-          <p style={{
-            fontSize: '14px',
-            color: '#AB978C',
-            maxWidth: '580px',
-            margin: '0 auto',
-            lineHeight: '1.6'
-          }}>
-            {isAdmin
-              ? 'Tạo tài khoản ngẫu nhiên, cấp quyền dùng thử nhanh và quản lý quyền truy cập hệ thống giao dịch.'
-              : 'Hệ thống hạ tầng dữ liệu biểu đồ real-time, Diamond AI Signals và bộ chỉ báo dao động chuyên sâu.'}
-          </p>
-        </div>
-
-        {/* Global Notifications / Alert Banner */}
+        {/* Global Notification Banner */}
         {message && (
           <div style={{
             width: '100%',
-            maxWidth: '780px',
-            padding: '12px 20px',
+            maxWidth: '820px',
+            padding: '12px 18px',
             marginBottom: '24px',
-            borderRadius: '4px',
+            borderRadius: '2px',
             fontSize: '13px',
             lineHeight: '1.5',
-            backgroundColor: message.type === 'success' ? 'rgba(74, 222, 128, 0.1)' : message.type === 'error' ? 'rgba(248, 113, 113, 0.1)' : 'rgba(96, 165, 250, 0.1)',
-            border: `1px solid ${message.type === 'success' ? '#4ade80' : message.type === 'error' ? '#f87171' : '#60a5fa'}`,
-            color: message.type === 'success' ? '#4ade80' : message.type === 'error' ? '#f87171' : '#93c5fd',
+            backgroundColor: message.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : message.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+            border: `1px solid ${message.type === 'success' ? '#22C55E' : message.type === 'error' ? '#EF4444' : '#3B82F6'}`,
+            color: message.type === 'success' ? '#4ADE80' : message.type === 'error' ? '#F87171' : '#93C5FD',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: '12px'
           }}>
             <span>{message.text}</span>
             <button
               onClick={() => setMessage(null)}
-              style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '14px' }}
+              style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '13px' }}
             >
               ✕
             </button>
           </div>
         )}
 
-        {/* Current User Status Banner */}
+        {/* User Current Membership Status Banner */}
         {subData && (
           <div style={{
             width: '100%',
-            maxWidth: '780px',
-            background: '#131722',
-            border: '1px solid #252a38',
-            borderRadius: '4px',
+            maxWidth: '820px',
+            background: '#121620',
+            border: '1px solid #222938',
+            borderRadius: '2px',
             padding: '18px 24px',
-            marginBottom: '32px',
+            marginBottom: '28px',
             display: 'flex',
             flexWrap: 'wrap',
             justifyContent: 'space-between',
@@ -549,32 +630,32 @@ function SubscriptionContent() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
               <div style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
-                background: isActive ? 'rgba(203, 177, 147, 0.15)' : 'rgba(255, 82, 82, 0.15)',
-                border: `1px solid ${isActive ? '#CBB193' : '#ff5252'}`,
+                width: '40px',
+                height: '40px',
+                background: isActive ? 'rgba(203, 177, 147, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                border: `1px solid ${isActive ? '#CBB193' : '#EF4444'}`,
+                borderRadius: '2px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '20px'
+                fontSize: '18px'
               }}>
                 {isAdmin ? '👑' : isActive ? '💎' : '⚠️'}
               </div>
               <div>
-                <div style={{ fontSize: '12px', color: '#AB978C', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                  Tài khoản đăng nhập: <strong style={{ color: '#E9E6E7' }}>{subData.email}</strong>
+                <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  Tài Khoản: <strong style={{ color: '#E9E6E7' }}>{subData.email}</strong>
                 </div>
                 <div style={{ fontSize: '15px', fontWeight: '700', color: '#E9E6E7', marginTop: '2px' }}>
                   {isAdmin
-                    ? 'Quản trị viên hệ thống (Admin Access - Vô hạn)'
+                    ? 'QUẢN TRỊ VIÊN HỆ THỐNG (ADMIN ACCESS)'
                     : isActive
-                    ? `Gói Đang Hoạt Động (${daysLeft} ngày còn lại)`
-                    : 'Tài khoản chưa kích hoạt / Đã hết hạn'}
+                    ? `GÓI PRO ĐANG HOẠT ĐỘNG // CÒN ${daysLeft} NGÀY`
+                    : 'CHƯA KÍCH HOẠT GÓI HOẶC ĐÃ HẾT HẠN'}
                 </div>
                 {expiryDateFormatted && !isAdmin && (
-                  <div style={{ fontSize: '12px', color: '#6B7C98', marginTop: '2px' }}>
-                    Thời hạn sử dụng đến: {expiryDateFormatted}
+                  <div style={{ fontSize: '12px', color: '#A0AEC0', marginTop: '2px' }}>
+                    Hạn sử dụng đến: <span style={{ color: '#00E5FF', fontWeight: '600' }}>{expiryDateFormatted}</span>
                   </div>
                 )}
               </div>
@@ -588,192 +669,539 @@ function SubscriptionContent() {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    padding: '9px 20px',
+                    padding: '9px 18px',
                     background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
                     color: '#0B0E14',
                     border: 'none',
                     borderRadius: '2px',
-                    fontSize: '13px',
-                    fontWeight: '700',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    letterSpacing: '0.5px',
                     textDecoration: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 10px rgba(203, 177, 147, 0.25)'
+                    boxShadow: '0 2px 10px rgba(203, 177, 147, 0.2)'
                   }}
                 >
-                  <span>Mở Biểu Đồ 🚀</span>
+                  <span>MỞ BIỂU ĐỒ ↗</span>
                 </Link>
               ) : (
                 <span style={{
-                  padding: '6px 14px',
-                  background: 'rgba(255, 82, 82, 0.1)',
-                  color: '#ff5252',
-                  border: '1px solid rgba(255, 82, 82, 0.3)',
+                  padding: '6px 12px',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  color: '#F87171',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
                   borderRadius: '2px',
-                  fontSize: '12px',
-                  fontWeight: '600'
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
                 }}>
-                  Chưa kích hoạt
+                  Inactive
                 </span>
               )}
             </div>
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* VIEW 1: REGULAR USER VIEW (PRICING PACKAGES TEMPORARILY HIDDEN)            */}
-        {/* ========================================================================= */}
-        {!isAdmin && (
+        {/* SECTION: PRICING & PAYMENT CHECKOUT (NOWPAYMENTS DIRECT USDT) */}
+        <div style={{ width: '100%', maxWidth: '820px', marginBottom: '40px' }}>
+          
           <div style={{
-            width: '100%',
-            maxWidth: '680px',
-            background: 'linear-gradient(180deg, #131722 0%, #0c0f17 100%)',
-            border: '1px solid #252a38',
-            borderRadius: '6px',
-            padding: '36px 30px',
-            textAlign: 'center',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+            background: 'linear-gradient(180deg, #131722 0%, #0D1018 100%)',
+            border: '1px solid #222938',
+            borderRadius: '2px',
+            padding: '32px 28px',
+            position: 'relative'
           }}>
-            <div style={{ fontSize: '42px', marginBottom: '16px' }}>
-              {isActive ? '💎' : '🔒'}
+            
+            {/* Architectural Tags Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  color: '#CBB193',
+                  background: 'rgba(203, 177, 147, 0.1)',
+                  border: '1px solid rgba(203, 177, 147, 0.3)',
+                  padding: '3px 8px',
+                  borderRadius: '2px',
+                  letterSpacing: '1px'
+                }}>
+                  TIER: PRO TERMINAL
+                </span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  color: '#00E5FF',
+                  background: 'rgba(0, 229, 255, 0.1)',
+                  border: '1px solid rgba(0, 229, 255, 0.3)',
+                  padding: '3px 8px',
+                  borderRadius: '2px',
+                  letterSpacing: '1px'
+                }}>
+                  MANUAL RENEWAL (30 NGÀY)
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '11px', color: '#26A17B', background: 'rgba(38, 161, 123, 0.15)', border: '1px solid rgba(38, 161, 123, 0.4)', padding: '3px 8px', borderRadius: '2px', fontWeight: 'bold' }}>
+                  ₮ USDT (Tether)
+                </span>
+              </div>
             </div>
 
-            <h2 style={{
-              fontSize: '22px',
-              fontWeight: '700',
-              color: '#E9E6E7',
-              margin: '0 0 12px 0'
-            }}>
-              {isActive
-                ? 'Tài Khoản Đang Có Quyền Truy Cập Đầy Đủ'
-                : 'Quyền Truy Cập Nền Tảng Giao Dịch TRADEWH'}
-            </h2>
-
-            <p style={{
-              fontSize: '14px',
-              color: '#AB978C',
-              lineHeight: '1.6',
-              maxWidth: '520px',
-              margin: '0 auto 24px auto'
-            }}>
-              {isActive
-                ? `Tài khoản của bạn đã được kích hoạt sử dụng trọn bộ tính năng biểu đồ đa khung thời gian, Diamond AI Signals và KSI Oscillator. Bạn còn ${daysLeft} ngày sử dụng.`
-                : 'Nền tảng TRADEWH hiện đang trong giai đoạn triển khai đặc quyền thông qua tài khoản dùng thử được cấp trực tiếp. Nếu bạn cần nhận tài khoản trải nghiệm hoặc hỗ trợ gia hạn, vui lòng liên hệ Admin qua Telegram.'}
-            </p>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              {isActive ? (
-                <Link
-                  href="/"
+            {/* Price Selection Options (Test $1 vs Standard $15) */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                1. Chọn Mức Phí Gói:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                
+                {/* Option 1: Test Mode ($1 BSC / $2 ETH) */}
+                <div
+                  onClick={() => setSelectedPrice(selectedNetwork === 'eth' ? '2.00' : '1.00')}
                   style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '12px 28px',
-                    background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
-                    color: '#0B0E14',
-                    textDecoration: 'none',
-                    borderRadius: '4px',
-                    fontSize: '14px',
-                    fontWeight: '800',
-                    boxShadow: '0 4px 15px rgba(203, 177, 147, 0.25)'
+                    padding: '14px 16px',
+                    background: (selectedPrice === '1.00' || selectedPrice === '2.00') ? 'rgba(203, 177, 147, 0.12)' : '#0E1118',
+                    border: `1px solid ${(selectedPrice === '1.00' || selectedPrice === '2.00') ? '#CBB193' : '#222938'}`,
+                    borderRadius: '2px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
                   }}
                 >
-                  <span>📊</span>
-                  <span>VÀO BIỂU ĐỒ GIAO DỊCH NGAY</span>
-                </Link>
-              ) : (
-                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <strong style={{ fontSize: '13px', color: (selectedPrice === '1.00' || selectedPrice === '2.00') ? '#CBB193' : '#E9E6E7' }}>
+                      🧪 Gói Test Thử Nghiệm
+                    </strong>
+                    <span style={{ fontSize: '10px', color: '#4ADE80', fontWeight: '700', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 6px', borderRadius: '2px' }}>
+                      TEST MODE
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '24px', fontWeight: '900', color: '#FFFFFF' }}>
+                      ${selectedNetwork === 'eth' ? '2.00' : '1.00'}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#6B7C98' }}>USD / 30 Ngày</span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#A0AEC0', display: 'block', marginTop: '2px' }}>
+                    {selectedNetwork === 'eth' ? '≈ 2.00 USDT (Tối thiểu $2 mạng ETH ERC-20)' : '≈ 1.00 USDT (Kích hoạt 30 ngày)'}
+                  </span>
+                </div>
+
+                {/* Option 2: Standard 15 USD */}
+                <div
+                  onClick={() => setSelectedPrice('15.00')}
+                  style={{
+                    padding: '14px 16px',
+                    background: selectedPrice === '15.00' ? 'rgba(203, 177, 147, 0.12)' : '#0E1118',
+                    border: `1px solid ${selectedPrice === '15.00' ? '#CBB193' : '#222938'}`,
+                    borderRadius: '2px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <strong style={{ fontSize: '13px', color: selectedPrice === '15.00' ? '#CBB193' : '#E9E6E7' }}>
+                      💎 Gói Pro Chuẩn
+                    </strong>
+                    <span style={{ fontSize: '10px', color: '#CBB193', fontWeight: '700', background: 'rgba(203, 177, 147, 0.15)', padding: '2px 6px', borderRadius: '2px' }}>
+                      OFFICIAL
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '24px', fontWeight: '900', color: '#FFFFFF' }}>$15.00</span>
+                    <span style={{ fontSize: '11px', color: '#6B7C98' }}>USD / 30 Ngày</span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#A0AEC0', display: 'block', marginTop: '2px' }}>
+                    ≈ 15.00 USDT (Kích hoạt 30 ngày)
+                  </span>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Network Selection (Cố định 2 mạng BSC và ETH) */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                2. Chọn Mạng Blockchain (USDT):
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+                
+                {/* Network 1: BSC (BEP-20) */}
+                <div
+                  onClick={() => {
+                    setSelectedNetwork('bsc');
+                    if (selectedPrice === '2.00') setSelectedPrice('1.00');
+                  }}
+                  style={{
+                    padding: '16px',
+                    background: selectedNetwork === 'bsc' ? 'rgba(240, 185, 11, 0.08)' : '#0E1118',
+                    border: `1.5px solid ${selectedNetwork === 'bsc' ? '#F0B90B' : '#222938'}`,
+                    borderRadius: '2px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    position: 'relative'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>🟡</span>
+                      <strong style={{ fontSize: '14px', color: selectedNetwork === 'bsc' ? '#F0B90B' : '#E9E6E7' }}>
+                        BNB Smart Chain (BSC)
+                      </strong>
+                    </div>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      color: '#0B0E14',
+                      background: '#F0B90B',
+                      padding: '2px 6px',
+                      borderRadius: '2px'
+                    }}>
+                      BEP-20
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: '#A0AEC0', margin: '0 0 6px 0', lineHeight: '1.4' }}>
+                    Phí gas cực rẻ (~$0.05) • Xác nhận nhanh trong 3 giây.
+                  </p>
+                  <div style={{ fontSize: '11px', color: '#4ADE80', fontWeight: '600' }}>
+                    ⚡ Khuyên dùng (Phù hợp test $1.00 USDT)
+                  </div>
+                </div>
+
+                {/* Network 2: Ethereum (ERC-20) */}
+                <div
+                  onClick={() => {
+                    setSelectedNetwork('eth');
+                    if (selectedPrice === '1.00') setSelectedPrice('2.00');
+                  }}
+                  style={{
+                    padding: '16px',
+                    background: selectedNetwork === 'eth' ? 'rgba(98, 126, 234, 0.08)' : '#0E1118',
+                    border: `1.5px solid ${selectedNetwork === 'eth' ? '#627EEA' : '#222938'}`,
+                    borderRadius: '2px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    position: 'relative'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>🔵</span>
+                      <strong style={{ fontSize: '14px', color: selectedNetwork === 'eth' ? '#627EEA' : '#E9E6E7' }}>
+                        Ethereum Mainnet
+                      </strong>
+                    </div>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      color: '#FFFFFF',
+                      background: '#627EEA',
+                      padding: '2px 6px',
+                      borderRadius: '2px'
+                    }}>
+                      ERC-20
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: '#A0AEC0', margin: '0 0 6px 0', lineHeight: '1.4' }}>
+                    Mạng chính thức Ethereum • Độ bảo mật tối đa.
+                  </p>
+                  <div style={{ fontSize: '11px', color: '#CBB193', fontWeight: '600' }}>
+                    Tối thiểu $2.00 USDT do phí gas ERC-20.
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Active Direct Payment Terminal Widget (Direct QR, Address, Amount) */}
+            {paymentInfo && (
+              <div style={{
+                marginBottom: '28px',
+                padding: '24px 20px',
+                background: '#0B0E14',
+                border: '1.5px solid #00E5FF',
+                borderRadius: '2px',
+                boxShadow: '0 8px 30px rgba(0, 229, 255, 0.08)'
+              }}>
+                {/* Payment Header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #1E2536' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>⚡</span>
+                    <strong style={{ fontSize: '15px', color: '#00E5FF', letterSpacing: '-0.3px' }}>
+                      Hóa Đơn Nạp USDT Mạng {paymentInfo.networkName || (selectedNetwork === 'eth' ? 'ETH (ERC-20)' : 'BSC (BEP-20)')}
+                    </strong>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: '#4ADE80', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 8px', borderRadius: '2px', fontWeight: 'bold' }}>
+                      WAITING PAYMENT (POLL #{pollCount})
+                    </span>
+                    {paymentInfo.paymentId && (
+                      <span style={{ fontSize: '11px', color: '#6B7C98', fontFamily: 'monospace' }}>
+                        ID: #{paymentInfo.paymentId}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Main QR & Details Layout */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                  
+                  {/* Left: Direct QR Code */}
+                  {paymentInfo.payAddress && (
+                    <div style={{
+                      padding: '10px',
+                      background: '#FFFFFF',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      boxShadow: '0 4px 15px rgba(0,0,0,0.4)'
+                    }}>
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${paymentInfo.payAddress}&margin=2`}
+                        alt="USDT Deposit QR"
+                        style={{ width: '160px', height: '160px', display: 'block' }}
+                      />
+                      <span style={{ fontSize: '10px', color: '#0B0E14', fontWeight: 'bold', marginTop: '4px' }}>
+                        QUÉT MÃ VÍ USDT
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Right: Amount & Address Copy Fields */}
+                  <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    
+                    {/* Amount Field */}
+                    <div>
+                      <span style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Số lượng USDT cần chuyển:
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#121620', border: '1px solid #222938', padding: '8px 12px', borderRadius: '2px', marginTop: '4px' }}>
+                        <code style={{ fontSize: '16px', fontWeight: 'bold', color: '#CBB193' }}>
+                          {paymentInfo.payAmount || paymentInfo.selectedPrice} USDT
+                        </code>
+                        <button
+                          onClick={() => handleCopyText(String(paymentInfo.payAmount || paymentInfo.selectedPrice), 'pay_amount')}
+                          style={{
+                            padding: '4px 8px',
+                            background: copiedKey === 'pay_amount' ? 'rgba(74, 222, 128, 0.2)' : '#1E2536',
+                            color: copiedKey === 'pay_amount' ? '#4ADE80' : '#E9E6E7',
+                            border: '1px solid #2A3347',
+                            borderRadius: '2px',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                            fontWeight: '600'
+                          }}
+                        >
+                          {copiedKey === 'pay_amount' ? '✓ Đã chép' : '📋 Chép Số Tiền'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Address Field */}
+                    {paymentInfo.payAddress && (
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          Địa chỉ ví nhận ({paymentInfo.networkName || 'BSC'}):
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#121620', border: '1px solid #222938', padding: '8px 12px', borderRadius: '2px', marginTop: '4px', gap: '8px' }}>
+                          <code style={{ fontSize: '12px', color: '#00E5FF', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                            {paymentInfo.payAddress}
+                          </code>
+                          <button
+                            onClick={() => handleCopyText(paymentInfo.payAddress, 'pay_addr')}
+                            style={{
+                              padding: '4px 8px',
+                              background: copiedKey === 'pay_addr' ? 'rgba(74, 222, 128, 0.2)' : '#1E2536',
+                              color: copiedKey === 'pay_addr' ? '#4ADE80' : '#E9E6E7',
+                              border: '1px solid #2A3347',
+                              borderRadius: '2px',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              fontWeight: '600',
+                              flexShrink: 0
+                            }}
+                          >
+                            {copiedKey === 'pay_addr' ? '✓ Đã chép' : '📋 Chép Ví'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ fontSize: '11px', color: '#A0AEC0', lineHeight: '1.4' }}>
+                      ⚠️ Lưu ý: Chỉ gửi <strong>USDT</strong> qua đúng mạng <strong>{paymentInfo.networkName}</strong>. Hệ thống sẽ tự động bắt giao dịch và kích hoạt tài khoản ngay khi có xác nhận.
+                    </div>
+
+                  </div>
+
+                </div>
+
+                {/* Bottom Actions */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', paddingTop: '12px', borderTop: '1px solid #1E2536' }}>
                   <a
-                    href="https://t.me/dhieu9b"
+                    href={paymentInfo.paymentUrl || paymentInfo.invoiceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
+                      flex: '1 1 200px',
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      padding: '12px 24px',
-                      background: '#0088cc',
-                      color: '#ffffff',
-                      textDecoration: 'none',
-                      borderRadius: '4px',
-                      fontSize: '14px',
-                      fontWeight: '700',
-                      transition: 'all 0.2s ease',
-                      boxShadow: '0 4px 15px rgba(0, 136, 204, 0.3)'
-                    }}
-                  >
-                    <span>💬</span>
-                    <span>Liên Hệ Admin Qua Telegram</span>
-                  </a>
-                  <Link
-                    href="/"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
+                      justifyContent: 'center',
                       gap: '6px',
-                      padding: '12px 20px',
-                      background: '#1c212d',
-                      color: '#E9E6E7',
+                      padding: '11px 18px',
+                      background: '#00E5FF',
+                      color: '#0B0E14',
                       textDecoration: 'none',
-                      border: '1px solid #252a38',
-                      borderRadius: '4px',
-                      fontSize: '14px',
-                      fontWeight: '600'
+                      borderRadius: '2px',
+                      fontSize: '12px',
+                      fontWeight: '800'
                     }}
                   >
-                    <span>Quay lại Trang Chủ</span>
-                  </Link>
+                    <span>MỞ TRÊN TRANG NOWPAYMENTS ↗</span>
+                  </a>
+
+                  {/* Active Status Sync Button */}
+                  <button
+                    onClick={handleCheckPaymentStatus}
+                    disabled={checkingStatus}
+                    style={{
+                      flex: '1 1 180px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      padding: '11px 18px',
+                      background: 'rgba(38, 161, 123, 0.2)',
+                      color: '#4ADE80',
+                      border: '1px solid #26A17B',
+                      borderRadius: '2px',
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      cursor: checkingStatus ? 'not-allowed' : 'pointer'
+                    }}
+                    title="Kiểm tra trạng thái xác nhận từ NOWPayments và đồng bộ ngay"
+                  >
+                    <span>{checkingStatus ? '⏳ ĐANG KIỂM TRA...' : '🔄 KIỂM TRA THANH TOÁN (SYNC)'}</span>
+                  </button>
+
+                  {/* Dev / Admin Simulation Confirm Button */}
+                  <button
+                    onClick={handleSimulateConfirm}
+                    disabled={simulating}
+                    style={{
+                      padding: '11px 16px',
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      color: '#E9E6E7',
+                      border: '1px solid #252A38',
+                      borderRadius: '2px',
+                      fontSize: '12px',
+                      cursor: simulating ? 'not-allowed' : 'pointer'
+                    }}
+                    title="Mô phỏng xác nhận thanh toán blockchain để kiểm tra luồng"
+                  >
+                    {simulating ? 'Đang kích hoạt...' : '⚡ Mô Phỏng Xác Nhận Nhanh (Test)'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Payment Action Button */}
+            <button
+              onClick={handleCreatePayment}
+              disabled={paying}
+              style={{
+                width: '100%',
+                padding: '16px 24px',
+                background: paying
+                  ? '#4A4644'
+                  : 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
+                color: '#0B0E14',
+                border: 'none',
+                borderRadius: '2px',
+                fontSize: '14px',
+                fontWeight: '900',
+                letterSpacing: '1px',
+                textTransform: 'uppercase',
+                cursor: paying ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                boxShadow: '0 4px 20px rgba(203, 177, 147, 0.2)',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              {paying ? (
+                <>
+                  <span>🔄</span>
+                  <span>ĐANG MỞ CỔNG THANH TOÁN NOWPAYMENTS...</span>
+                </>
+              ) : (
+                <>
+                  <span>💳</span>
+                  <span>
+                    THANH TOÁN ${selectedPrice} USDT QUA MẠNG {selectedNetwork === 'eth' ? 'ETH (ERC-20)' : 'BSC (BEP-20)'} ↗
+                  </span>
                 </>
               )}
+            </button>
+
+            <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', fontSize: '11px', color: '#6B7C98' }}>
+              <span>🔒 Cổng bảo mật NOWPayments</span>
+              <span>•</span>
+              <span>⚡ Mạng {selectedNetwork === 'eth' ? 'Ethereum (ERC-20)' : 'BNB Smart Chain (BEP-20)'}</span>
+              <span>•</span>
+              <span>💬 Hỗ trợ Telegram: <a href="https://t.me/dhieu9b" target="_blank" rel="noopener noreferrer" style={{ color: '#00E5FF', textDecoration: 'none' }}>@dhieu9b</a></span>
             </div>
+
           </div>
-        )}
+        </div>
 
         {/* ========================================================================= */}
-        {/* VIEW 2: ADMIN MANAGEMENT DASHBOARD                                        */}
+        {/* VIEW: ADMIN MANAGEMENT CENTER                                             */}
         {/* ========================================================================= */}
         {isAdmin && (
-          <div style={{ width: '100%', maxWidth: '780px', display: 'flex', flexDirection: 'column', gap: '28px' }}>
+          <div style={{ width: '100%', maxWidth: '820px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* TOOL 1: RANDOM TRIAL ACCOUNT GENERATOR */}
+            {/* TOOL 1: 1-CLICK RANDOM TRIAL GENERATOR */}
             <div style={{
-              background: 'linear-gradient(180deg, #131722 0%, #0d111a 100%)',
+              background: '#121620',
               border: '1px solid #CBB193',
-              borderRadius: '6px',
-              padding: '28px 24px',
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(203, 177, 147, 0.1)'
+              borderRadius: '2px',
+              padding: '24px 24px',
+              boxShadow: '0 0 20px rgba(203, 177, 147, 0.08)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '24px' }}>🎲</span>
+                  <span style={{ fontSize: '20px' }}>🎲</span>
                   <div>
-                    <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#E9E6E7', margin: 0 }}>
-                      Tạo Tài Khoản Dùng Thử Ngẫu Nhiên
-                    </h2>
-                    <p style={{ fontSize: '12px', color: '#AB978C', margin: '2px 0 0 0' }}>
-                      Tự động tạo email và mật khẩu ngẫu nhiên kèm thời hạn dùng thử.
+                    <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#E9E6E7', margin: 0 }}>
+                      Tạo Tài Khoản Dùng Thử Ngẫu Nhiên (Admin Generator)
+                    </h3>
+                    <p style={{ fontSize: '12px', color: '#6B7C98', margin: '2px 0 0 0' }}>
+                      Tự động tạo email, mật khẩu ngẫu nhiên kèm thời hạn dùng thử và format sẵn để gửi khách.
                     </p>
                   </div>
                 </div>
                 <span style={{
-                  fontSize: '11px',
+                  fontSize: '10px',
                   fontWeight: '700',
                   color: '#0B0E14',
                   background: '#CBB193',
-                  padding: '3px 8px',
+                  padding: '2px 6px',
                   borderRadius: '2px',
                   textTransform: 'uppercase'
                 }}>
-                  1-Click Generator
+                  Admin Tool
                 </span>
               </div>
 
               {/* Duration Options */}
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#E9E6E7', marginBottom: '8px' }}>
-                  ⏱️ Chọn Thời Hạn Dùng Thử:
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Thời Hạn Dùng Thử:
                 </label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
                   {[
                     { label: '1 Ngày', value: 1 },
                     { label: '3 Ngày (Chuẩn)', value: 3 },
@@ -789,15 +1217,14 @@ function SubscriptionContent() {
                         setGenCustomDays('');
                       }}
                       style={{
-                        padding: '8px 14px',
-                        background: genDays === item.value && !genCustomDays ? '#CBB193' : '#1c212d',
+                        padding: '6px 12px',
+                        background: genDays === item.value && !genCustomDays ? '#CBB193' : '#0B0E14',
                         color: genDays === item.value && !genCustomDays ? '#0B0E14' : '#E9E6E7',
-                        border: `1px solid ${genDays === item.value && !genCustomDays ? '#CBB193' : '#252a38'}`,
-                        borderRadius: '4px',
+                        border: `1px solid ${genDays === item.value && !genCustomDays ? '#CBB193' : '#222938'}`,
+                        borderRadius: '2px',
                         fontSize: '12px',
                         fontWeight: '700',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
+                        cursor: 'pointer'
                       }}
                     >
                       {item.label}
@@ -805,20 +1232,20 @@ function SubscriptionContent() {
                   ))}
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
-                    <span style={{ fontSize: '12px', color: '#6B7C98' }}>Hoặc:</span>
+                    <span style={{ fontSize: '11px', color: '#6B7C98' }}>Khác:</span>
                     <input
                       type="number"
                       min="1"
                       max="365"
-                      placeholder="Số ngày khác"
+                      placeholder="Số ngày"
                       value={genCustomDays}
                       onChange={(e) => setGenCustomDays(e.target.value)}
                       style={{
-                        width: '105px',
-                        padding: '7px 10px',
-                        background: '#0b0e14',
-                        border: '1px solid #252a38',
-                        borderRadius: '4px',
+                        width: '80px',
+                        padding: '5px 8px',
+                        background: '#0B0E14',
+                        border: '1px solid #222938',
+                        borderRadius: '2px',
                         color: '#E9E6E7',
                         fontSize: '12px'
                       }}
@@ -827,21 +1254,21 @@ function SubscriptionContent() {
                 </div>
               </div>
 
-              {/* Prefix & Note Options */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+              {/* Prefix & Note */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#E9E6E7', marginBottom: '6px' }}>
-                    🏷️ Tiền tố Email:
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Tiền Tố Email:
                   </label>
                   <select
                     value={genPrefix}
                     onChange={(e) => setGenPrefix(e.target.value)}
                     style={{
                       width: '100%',
-                      padding: '9px 10px',
-                      background: '#0b0e14',
-                      border: '1px solid #252a38',
-                      borderRadius: '4px',
+                      padding: '7px 10px',
+                      background: '#0B0E14',
+                      border: '1px solid #222938',
+                      borderRadius: '2px',
                       color: '#E9E6E7',
                       fontSize: '12px'
                     }}
@@ -854,8 +1281,8 @@ function SubscriptionContent() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#E9E6E7', marginBottom: '6px' }}>
-                    📝 Ghi chú (Khách hàng / Nguồn):
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Ghi Chú Khách Hàng:
                   </label>
                   <input
                     type="text"
@@ -864,10 +1291,10 @@ function SubscriptionContent() {
                     onChange={(e) => setGenNote(e.target.value)}
                     style={{
                       width: '100%',
-                      padding: '9px 10px',
-                      background: '#0b0e14',
-                      border: '1px solid #252a38',
-                      borderRadius: '4px',
+                      padding: '7px 10px',
+                      background: '#0B0E14',
+                      border: '1px solid #222938',
+                      borderRadius: '2px',
                       color: '#E9E6E7',
                       fontSize: '12px',
                       boxSizing: 'border-box'
@@ -876,189 +1303,109 @@ function SubscriptionContent() {
                 </div>
               </div>
 
-              {/* Generate Action Button */}
+              {/* Generate Button */}
               <button
                 type="button"
                 onClick={handleGenerateTrialAccount}
                 disabled={genLoading}
                 style={{
                   width: '100%',
-                  padding: '13px 20px',
-                  background: genLoading ? '#5E5653' : 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
+                  padding: '11px 18px',
+                  background: genLoading ? '#4A4644' : 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
                   color: '#0B0E14',
                   border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '14px',
+                  borderRadius: '2px',
+                  fontSize: '13px',
                   fontWeight: '800',
                   letterSpacing: '0.5px',
                   cursor: genLoading ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '8px',
-                  boxShadow: '0 4px 15px rgba(203, 177, 147, 0.25)',
-                  transition: 'all 0.2s ease'
+                  gap: '8px'
                 }}
               >
-                {genLoading ? (
-                  <>
-                    <span>🔄</span>
-                    <span>ĐANG KHỞI TẠO TÀI KHOẢN...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>⚡</span>
-                    <span>TỰ ĐỘNG TẠO TÀI KHOẢN & MẬT KHẨU ({genCustomDays || genDays} NGÀY)</span>
-                  </>
-                )}
+                {genLoading ? 'ĐANG KHỞI TẠO...' : `⚡ TỰ ĐỘNG TẠO TÀI KHOẢN & MẬT KHẨU (${genCustomDays || genDays} NGÀY)`}
               </button>
 
-              {/* HIGHLIGHT: LATEST GENERATED ACCOUNT RESULT BOX */}
+              {/* Generated Account Details Result Box */}
               {latestCreatedAccount && (
                 <div style={{
-                  marginTop: '24px',
-                  padding: '20px',
-                  background: 'rgba(203, 177, 147, 0.08)',
+                  marginTop: '20px',
+                  padding: '16px',
+                  background: 'rgba(203, 177, 147, 0.05)',
                   border: '1px solid #CBB193',
-                  borderRadius: '6px',
-                  position: 'relative'
+                  borderRadius: '2px'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '18px' }}>🎉</span>
-                      <strong style={{ fontSize: '14px', color: '#4ade80' }}>
-                        Đã Tạo Thành Công Tài Khoản Dùng Thử!
-                      </strong>
-                    </div>
-                    <span style={{ fontSize: '12px', color: '#AB978C' }}>
-                      Hạn: <strong style={{ color: '#CBB193' }}>{latestCreatedAccount.days} Ngày</strong>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#4ADE80' }}>
+                      ✓ Đã Tạo Thành Công Tài Khoản!
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#CBB193' }}>
+                      Thời hạn: <strong>{latestCreatedAccount.days} Ngày</strong>
                     </span>
                   </div>
 
-                  {/* Account Details Box */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: '#0b0e14', padding: '14px', borderRadius: '4px', border: '1px solid #252a38' }}>
-                    {/* Email Row */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '12px', color: '#6B7C98', width: '70px' }}>Email:</span>
-                        <code style={{ fontSize: '14px', color: '#00E5FF', fontWeight: 'bold' }}>
-                          {latestCreatedAccount.email}
-                        </code>
-                      </div>
-                      <button
-                        onClick={() => handleCopyText(latestCreatedAccount.email, 'email')}
-                        style={{
-                          padding: '4px 10px',
-                          background: copiedKey === 'email' ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-                          color: copiedKey === 'email' ? '#4ade80' : '#E9E6E7',
-                          border: `1px solid ${copiedKey === 'email' ? '#4ade80' : '#252a38'}`,
-                          borderRadius: '3px',
-                          fontSize: '11px',
-                          fontWeight: '600',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {copiedKey === 'email' ? '✓ Đã chép Email' : '📋 Chép Email'}
-                      </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#0B0E14', padding: '12px', borderRadius: '2px', border: '1px solid #222938' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', color: '#6B7C98' }}>Email:</span>
+                      <code style={{ fontSize: '13px', color: '#00E5FF', fontWeight: 'bold' }}>
+                        {latestCreatedAccount.email}
+                      </code>
                     </div>
-
-                    {/* Password Row */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', color: '#6B7C98' }}>Mật khẩu:</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '12px', color: '#6B7C98', width: '70px' }}>Mật khẩu:</span>
-                        <code style={{ fontSize: '14px', color: '#f59e0b', fontWeight: 'bold', letterSpacing: '1px' }}>
+                        <code style={{ fontSize: '13px', color: '#F59E0B', fontWeight: 'bold' }}>
                           {showPassword ? latestCreatedAccount.password : '••••••••••••'}
                         </code>
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          style={{ background: 'none', border: 'none', color: '#6B7C98', cursor: 'pointer', fontSize: '12px' }}
-                          title={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                          style={{ background: 'none', border: 'none', color: '#6B7C98', cursor: 'pointer', fontSize: '11px' }}
                         >
-                          {showPassword ? '👁️' : '🔒'}
+                          {showPassword ? 'Ẩn' : 'Hiện'}
                         </button>
                       </div>
-                      <button
-                        onClick={() => handleCopyText(latestCreatedAccount.password, 'password')}
-                        style={{
-                          padding: '4px 10px',
-                          background: copiedKey === 'password' ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-                          color: copiedKey === 'password' ? '#4ade80' : '#E9E6E7',
-                          border: `1px solid ${copiedKey === 'password' ? '#4ade80' : '#252a38'}`,
-                          borderRadius: '3px',
-                          fontSize: '11px',
-                          fontWeight: '600',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {copiedKey === 'password' ? '✓ Đã chép Mật khẩu' : '📋 Chép Mật khẩu'}
-                      </button>
-                    </div>
-
-                    {/* Expiry Row */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#6B7C98', marginTop: '2px' }}>
-                      <span style={{ width: '70px' }}>Hết hạn:</span>
-                      <span style={{ color: '#E9E6E7' }}>
-                        {latestCreatedAccount.expiryDateFormatted || latestCreatedAccount.subscriptionExpiry}
-                      </span>
                     </div>
                   </div>
 
-                  {/* Copy All Dispatch Button */}
                   <button
                     onClick={() => handleCopyText(formatFullAccountMessage(latestCreatedAccount), 'full')}
                     style={{
                       width: '100%',
-                      marginTop: '12px',
-                      padding: '10px 16px',
-                      background: copiedKey === 'full' ? '#22c55e' : '#1c212d',
-                      color: '#ffffff',
-                      border: `1px solid ${copiedKey === 'full' ? '#22c55e' : '#CBB193'}`,
-                      borderRadius: '4px',
-                      fontSize: '13px',
+                      marginTop: '10px',
+                      padding: '9px 14px',
+                      background: copiedKey === 'full' ? '#22C55E' : '#1A202C',
+                      color: '#FFFFFF',
+                      border: `1px solid ${copiedKey === 'full' ? '#22C55E' : '#CBB193'}`,
+                      borderRadius: '2px',
+                      fontSize: '12px',
                       fontWeight: '700',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      transition: 'all 0.2s ease'
+                      cursor: 'pointer'
                     }}
                   >
-                    <span>{copiedKey === 'full' ? '✓' : '📋'}</span>
-                    <span>
-                      {copiedKey === 'full'
-                        ? 'ĐÃ SAO CHÉP TOÀN BỘ NỘI DUNG GỬI KHÁCH!'
-                        : 'SAO CHÉP TOÀN BỘ THÔNG TIN (ĐỂ GỬI KHÁCH HÀNG)'}
-                    </span>
+                    {copiedKey === 'full' ? '✓ ĐÃ SAO CHÉP TOÀN BỘ NỘI DUNG GỬI KHÁCH!' : '📋 SAO CHÉP TOÀN BỘ THÔNG TIN (ĐỂ GỬI KHÁCH HÀNG)'}
                   </button>
                 </div>
               )}
 
-              {/* RECENT TRIAL ACCOUNTS LIST */}
+              {/* Recent Trials List */}
               {recentTrials.length > 0 && (
-                <div style={{ marginTop: '24px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#AB978C', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      📋 Các Tài Khoản Vừa Tạo Gần Đây ({recentTrials.length}):
+                <div style={{ marginTop: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Các Tài Khoản Đã Tạo Gần Đây ({recentTrials.length}):
                     </span>
                     <button
                       onClick={handleClearHistory}
-                      style={{ background: 'none', border: 'none', color: '#6B7C98', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
+                      style={{ background: 'none', border: 'none', color: '#6B7C98', cursor: 'pointer', fontSize: '11px' }}
                     >
                       Xóa lịch sử
                     </button>
                   </div>
 
-                  <div style={{
-                    maxHeight: '220px',
-                    overflowY: 'auto',
-                    background: '#0b0e14',
-                    border: '1px solid #252a38',
-                    borderRadius: '4px',
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}>
+                  <div style={{ maxHeight: '180px', overflowY: 'auto', background: '#0B0E14', border: '1px solid #222938', borderRadius: '2px' }}>
                     {recentTrials.map((acc, idx) => (
                       <div
                         key={acc.id || idx}
@@ -1066,62 +1413,54 @@ function SubscriptionContent() {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
-                          padding: '10px 14px',
-                          borderBottom: idx < recentTrials.length - 1 ? '1px solid #1a202c' : 'none',
-                          fontSize: '12px',
-                          gap: '10px'
+                          padding: '8px 12px',
+                          borderBottom: idx < recentTrials.length - 1 ? '1px solid #1A202C' : 'none',
+                          fontSize: '12px'
                         }}
                       >
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <strong style={{ color: '#00E5FF' }}>{acc.email}</strong>
-                            <span style={{ color: '#6B7C98' }}>•</span>
-                            <span style={{ color: '#f59e0b', fontWeight: '600' }}>{acc.password}</span>
-                          </div>
-                          <div style={{ fontSize: '11px', color: '#6B7C98', marginTop: '2px' }}>
-                            Thời hạn: {acc.days} ngày | Hết hạn: {acc.expiryDateFormatted || acc.subscriptionExpiry}
-                          </div>
+                        <div>
+                          <span style={{ color: '#00E5FF', fontWeight: '600' }}>{acc.email}</span>
+                          <span style={{ color: '#6B7C98', margin: '0 6px' }}>•</span>
+                          <span style={{ color: '#F59E0B' }}>{acc.password}</span>
+                          <span style={{ color: '#6B7C98', fontSize: '11px', marginLeft: '6px' }}>({acc.days}d)</span>
                         </div>
-
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            onClick={() => handleCopyText(formatFullAccountMessage(acc), `hist-${idx}`)}
-                            style={{
-                              padding: '4px 8px',
-                              background: copiedKey === `hist-${idx}` ? 'rgba(74, 222, 128, 0.2)' : '#1c212d',
-                              color: copiedKey === `hist-${idx}` ? '#4ade80' : '#E9E6E7',
-                              border: '1px solid #252a38',
-                              borderRadius: '2px',
-                              fontSize: '11px',
-                              cursor: 'pointer'
-                            }}
-                            title="Sao chép toàn bộ nội dung gửi khách"
-                          >
-                            {copiedKey === `hist-${idx}` ? '✓ Đã chép' : '📋 Chép gửi'}
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => handleCopyText(formatFullAccountMessage(acc), `hist-${idx}`)}
+                          style={{
+                            padding: '3px 8px',
+                            background: copiedKey === `hist-${idx}` ? 'rgba(34, 197, 94, 0.2)' : '#1A202C',
+                            color: copiedKey === `hist-${idx}` ? '#4ADE80' : '#E9E6E7',
+                            border: '1px solid #222938',
+                            borderRadius: '2px',
+                            fontSize: '11px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {copiedKey === `hist-${idx}` ? '✓ Đã chép' : '📋 Chép'}
+                        </button>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
+
             </div>
 
-            {/* TOOL 2: GRANT TRIAL TO EXISTING REGISTERED ACCOUNT */}
+            {/* TOOL 2: QUICK GRANT TRIAL TO REGISTERED EMAIL */}
             <div style={{
-              background: '#131722',
-              border: '1px solid #252a38',
-              borderRadius: '6px',
-              padding: '24px'
+              background: '#121620',
+              border: '1px solid #222938',
+              borderRadius: '2px',
+              padding: '20px 24px'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '20px' }}>🎁</span>
-                <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#E9E6E7', margin: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🎁</span>
+                <h4 style={{ fontSize: '14px', fontWeight: '700', color: '#E9E6E7', margin: 0 }}>
                   Cấp Quyền Dùng Thử Cho Email Khách Đã Đăng Ký
-                </h3>
+                </h4>
               </div>
-              <p style={{ fontSize: '12px', color: '#AB978C', margin: '0 0 16px 0', lineHeight: '1.5' }}>
-                Dùng khi khách hàng đã tự tạo tài khoản email trên hệ thống và bạn muốn mở quyền sử dụng cho email đó.
+              <p style={{ fontSize: '12px', color: '#6B7C98', margin: '0 0 14px 0' }}>
+                Mở quyền trực tiếp cho email người dùng đã tạo trên hệ thống.
               </p>
 
               {adminMsg && (
@@ -1129,132 +1468,67 @@ function SubscriptionContent() {
                   padding: '8px 12px',
                   borderRadius: '2px',
                   fontSize: '12px',
-                  marginBottom: '12px',
-                  backgroundColor: adminMsg.type === 'success' ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)',
-                  border: `1px solid ${adminMsg.type === 'success' ? '#4ade80' : '#f87171'}`,
-                  color: adminMsg.type === 'success' ? '#4ade80' : '#f87171'
+                  marginBottom: '10px',
+                  backgroundColor: adminMsg.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${adminMsg.type === 'success' ? '#22C55E' : '#EF4444'}`,
+                  color: adminMsg.type === 'success' ? '#4ADE80' : '#F87171'
                 }}>
                   {adminMsg.text}
                 </div>
               )}
 
-              <form onSubmit={handleAdminGrantTrial} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div>
-                  <input
-                    type="email"
-                    placeholder="Email người dùng đã đăng ký (vd: user@gmail.com)"
-                    value={adminTargetEmail}
-                    onChange={(e) => setAdminTargetEmail(e.target.value)}
-                    required
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      background: '#0b0e14',
-                      border: '1px solid #252a38',
-                      borderRadius: '4px',
-                      color: '#E9E6E7',
-                      fontSize: '13px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <input
-                    type="number"
-                    min="1"
-                    max="365"
-                    value={adminDays}
-                    onChange={(e) => setAdminDays(e.target.value)}
-                    placeholder="Số ngày (vd: 3)"
-                    style={{
-                      width: '120px',
-                      padding: '10px 12px',
-                      background: '#0b0e14',
-                      border: '1px solid #252a38',
-                      borderRadius: '4px',
-                      color: '#E9E6E7',
-                      fontSize: '13px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    disabled={adminLoading}
-                    style={{
-                      flex: 1,
-                      padding: '10px 16px',
-                      background: '#6B7C98',
-                      color: '#FFFFFF',
-                      border: 'none',
-                      borderRadius: '4px',
-                      fontSize: '13px',
-                      fontWeight: '700',
-                      cursor: adminLoading ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    {adminLoading ? 'Đang cấp...' : `🎁 Cấp ${adminDays} Ngày Dùng Thử`}
-                  </button>
-                </div>
+              <form onSubmit={handleAdminGrantTrial} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <input
+                  type="email"
+                  placeholder="Email người dùng (vd: user@gmail.com)"
+                  value={adminTargetEmail}
+                  onChange={(e) => setAdminTargetEmail(e.target.value)}
+                  required
+                  style={{
+                    flex: '2 1 200px',
+                    padding: '8px 12px',
+                    background: '#0B0E14',
+                    border: '1px solid #222938',
+                    borderRadius: '2px',
+                    color: '#E9E6E7',
+                    fontSize: '12px'
+                  }}
+                />
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={adminDays}
+                  onChange={(e) => setAdminDays(e.target.value)}
+                  placeholder="Số ngày"
+                  style={{
+                    width: '90px',
+                    padding: '8px 12px',
+                    background: '#0B0E14',
+                    border: '1px solid #222938',
+                    borderRadius: '2px',
+                    color: '#E9E6E7',
+                    fontSize: '12px'
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={adminLoading}
+                  style={{
+                    flex: '1 1 120px',
+                    padding: '8px 14px',
+                    background: '#252A38',
+                    color: '#FFFFFF',
+                    border: '1px solid #3A4359',
+                    borderRadius: '2px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: adminLoading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {adminLoading ? 'Đang cấp...' : `🎁 Cấp ${adminDays} Ngày`}
+                </button>
               </form>
-            </div>
-
-            {/* TOOL 3: OPTIONAL ADMIN CRYPTOMUS TEST BOX (COLLAPSIBLE) */}
-            <div style={{
-              background: '#131722',
-              border: '1px solid #252a38',
-              borderRadius: '6px',
-              padding: '18px 24px'
-            }}>
-              <div
-                onClick={() => setShowAdminPaymentTest(!showAdminPaymentTest)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  cursor: 'pointer',
-                  userSelect: 'none'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>💳</span>
-                  <span style={{ fontSize: '13px', fontWeight: '700', color: '#AB978C' }}>
-                    Kiểm Tra Cổng Thanh Toán Cryptomus (45 USDT)
-                  </span>
-                </div>
-                <span style={{ fontSize: '12px', color: '#6B7C98' }}>
-                  {showAdminPaymentTest ? '▲ Thu gọn' : '▼ Mở rộng'}
-                </span>
-              </div>
-
-              {showAdminPaymentTest && (
-                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #252a38' }}>
-                  <p style={{ fontSize: '12px', color: '#6B7C98', margin: '0 0 12px 0' }}>
-                    Phần này chỉ dùng để kiểm tra luồng thanh toán hóa đơn 45 USDT qua Cryptomus.
-                  </p>
-                  <button
-                    onClick={handleCreatePayment}
-                    disabled={paying}
-                    style={{
-                      padding: '10px 18px',
-                      background: '#CBB193',
-                      color: '#0B0E14',
-                      border: 'none',
-                      borderRadius: '2px',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      cursor: paying ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    {paying ? 'Đang tạo đơn...' : 'Tạo Đơn Hàng Thử Nghiệm (45 USDT)'}
-                  </button>
-
-                  {paymentInfo && (
-                    <div style={{ marginTop: '12px', fontSize: '12px', color: '#CBB193' }}>
-                      Đơn: #{paymentInfo.orderId} - <a href={paymentInfo.paymentUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#00E5FF' }}>Mở cổng thanh toán ↗</a>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
 
           </div>
@@ -1267,7 +1541,11 @@ function SubscriptionContent() {
 
 export default function SubscriptionPage() {
   return (
-    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#0b0e14', color: '#CBB193', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Đang tải...</div>}>
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', background: '#0B0E14', color: '#CBB193', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace' }}>
+        LOADING TRADEWH SUBSCRIPTION TERMINAL...
+      </div>
+    }>
       <SubscriptionContent />
     </Suspense>
   );

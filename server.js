@@ -13,6 +13,11 @@ const { telegramSignalBot, TRADE_STATUS } = require('./src/lib/telegram-signal-b
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
+// Global JSON serialization fix for Prisma BigInt fields
+BigInt.prototype.toJSON = function () {
+  return this.toString();
+};
+
 const dev = process.env.NODE_ENV !== 'production';
 const nextApp = next({ dev });
 const handle = nextApp.getRequestHandler();
@@ -24,9 +29,47 @@ const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || '').trim();
 const SESSION_SECRET = (process.env.SESSION_SECRET || 'crazii_jwt_session_secret_key_super_secure_2026').trim();
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID || undefined);
 
-// Cryptomus Payment Configuration
+// Payment Gateways Configuration (NOWPayments & Cryptomus)
+const NOWPAYMENTS_API_KEY = (process.env.NOWPAYMENTS_API_KEY || '').trim();
+const NOWPAYMENTS_IPN_SECRET_KEY = (process.env.NOWPAYMENTS_IPN_SECRET_KEY || process.env.NOWPAYMENTS_IPN_SECRET || '').trim();
 const CRYPTOMUS_MERCHANT_ID = (process.env.CRYPTOMUS_MERCHANT_ID || '').trim();
 const CRYPTOMUS_PAYMENT_API_KEY = (process.env.CRYPTOMUS_PAYMENT_API_KEY || '').trim();
+const APP_URL = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim();
+
+function getAppBaseUrl(req) {
+  if (process.env.NOWPAYMENTS_IPN_URL) {
+    return process.env.NOWPAYMENTS_IPN_URL.replace(/\/+$/, '');
+  }
+  const host = req?.headers?.['x-forwarded-host'] || req?.headers?.host || '';
+  if (host.includes('crazii.onrender.com') || (process.env.NODE_ENV === 'production' && !host.includes('localhost') && !host.includes('127.0.0.1'))) {
+    return 'https://crazii.onrender.com';
+  }
+  if (APP_URL && !APP_URL.includes('PLACEHOLDER')) {
+    return APP_URL.replace(/\/+$/, '');
+  }
+  if (host.includes('localhost') || host.includes('127.0.0.1')) {
+    return `http://${host}`;
+  }
+  const proto = req?.headers?.['x-forwarded-proto'] || (host.includes('localhost') ? 'http' : 'https');
+  return `${proto}://${host || `localhost:${PORT}`}`;
+}
+
+function verifyNowPaymentsSignature(payload, signatureHeader, ipnSecret) {
+  if (!signatureHeader || !ipnSecret) return false;
+  try {
+    const raw = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    const sortedKeys = Object.keys(raw).sort();
+    const sortedObj = {};
+    for (const key of sortedKeys) {
+      sortedObj[key] = raw[key];
+    }
+    const sortedString = JSON.stringify(sortedObj);
+    const expectedSig = crypto.createHmac('sha512', ipnSecret).update(sortedString).digest('hex');
+    return expectedSig === signatureHeader;
+  } catch (e) {
+    return false;
+  }
+}
 
 // Admin Access Configuration
 const ADMIN_SECRET_KEY = (process.env.ADMIN_SECRET_KEY || 'tradewh_admin_secret_key_2026').trim();
@@ -53,11 +96,16 @@ function isUserSubscriptionActive(user) {
   return false;
 }
 
-// Active Sockets tracker for instant 0ms single-device kick-out
+// Active Sockets tracker for single-device kick-out (disabled when ALLOW_CONCURRENT_SESSIONS is true)
 let ioServer = null;
 const activeUserSockets = new Map(); // userId -> Set of clientSocket instances
+const ALLOW_CONCURRENT_SESSIONS = process.env.ALLOW_CONCURRENT_SESSIONS === 'true';
 
 function kickoutUserSockets(userIdentifier, newDeviceId) {
+  if (ALLOW_CONCURRENT_SESSIONS) {
+    // Multi-device concurrent login enabled: keep all existing sessions alive
+    return;
+  }
   if (!userIdentifier) return;
   const key = String(userIdentifier).toLowerCase().trim();
   console.log(`[Single Device] ⚡ Checking sockets to kick out for user: "${key}" (newDeviceId: ${newDeviceId})`);
@@ -67,7 +115,8 @@ function kickoutUserSockets(userIdentifier, newDeviceId) {
       const sEmail = (s.userEmail || s.user?.email || '').toLowerCase().trim();
       const sId = String(s.userId || s.user?.id || s.user?.sub || '').toLowerCase().trim();
 
-      const isMatch = (sEmail && (sEmail === key || key.includes(sEmail))) || (sId && sId === key);
+      // Strict exact match: ensure we ONLY kick sockets belonging to THIS EXACT USER
+      const isMatch = (sEmail && sEmail === key) || (sId && sId === key);
       if (isMatch) {
         if (s.deviceId && s.deviceId !== newDeviceId) {
           console.log(`[Single Device] ⚡ Kicking out old socket (${s.id}) for user ${key}. (Old device: ${s.deviceId} !== New device: ${newDeviceId})`);
@@ -359,6 +408,15 @@ async function saveSubscriptionOrder(orderObj) {
   }
 }
 
+// Helper to safely format order and serialize BigInt ID
+function formatSubscriptionOrder(order) {
+  if (!order) return null;
+  return {
+    ...order,
+    id: order.id !== undefined && order.id !== null ? String(order.id) : null
+  };
+}
+
 // Helper: Find Subscription Order by order_id via Prisma ORM
 async function findSubscriptionOrder(orderId) {
   if (!orderId) return null;
@@ -367,7 +425,7 @@ async function findSubscriptionOrder(orderId) {
       const order = await prisma.subscriptionOrder.findUnique({
         where: { order_id: orderId }
       });
-      if (order) return order;
+      if (order) return formatSubscriptionOrder(order);
     }
   } catch (err) {
     console.warn(`[Prisma ORM] ⚠️ Notice finding subscription order:`, err.message);
@@ -381,7 +439,42 @@ async function findSubscriptionOrder(orderId) {
         .select('*')
         .eq('order_id', orderId)
         .maybeSingle();
-      if (!error && data) return data;
+      if (!error && data) return formatSubscriptionOrder(data);
+    } catch (e) {}
+  }
+
+  return null;
+}
+
+// Helper: Find Subscription Order by Payment ID (NOWPayments / Cryptomus) via Prisma ORM
+async function findSubscriptionOrderByPaymentId(paymentId) {
+  if (!paymentId) return null;
+  const strId = String(paymentId).trim();
+  try {
+    if (prisma && prisma.subscriptionOrder) {
+      const order = await prisma.subscriptionOrder.findFirst({
+        where: {
+          OR: [
+            { cryptomus_uuid: strId },
+            { order_id: strId }
+          ]
+        }
+      });
+      if (order) return formatSubscriptionOrder(order);
+    }
+  } catch (err) {
+    console.warn(`[Prisma ORM] ⚠️ Notice finding subscription order by payment ID:`, err.message);
+  }
+
+  // Fallback to Supabase REST
+  if (supabaseServer) {
+    try {
+      const { data, error } = await supabaseServer
+        .from('subscription_orders')
+        .select('*')
+        .or(`cryptomus_uuid.eq.${strId},order_id.eq.${strId}`)
+        .maybeSingle();
+      if (!error && data) return formatSubscriptionOrder(data);
     } catch (e) {}
   }
 
@@ -539,8 +632,8 @@ async function requireAuthAndDevice(req, res, next) {
     });
   }
 
-  // Enforce Single Device Limit
-  if (dbUser.currentDeviceId && sessionPayload.deviceId && dbUser.currentDeviceId !== sessionPayload.deviceId) {
+  // Enforce Single Device Limit (Bypassed if ALLOW_CONCURRENT_SESSIONS is true)
+  if (!ALLOW_CONCURRENT_SESSIONS && dbUser.currentDeviceId && sessionPayload.deviceId && dbUser.currentDeviceId !== sessionPayload.deviceId) {
     return res.status(401).json({
       success: false,
       code: 'DEVICE_SESSION_TERMINATED',
@@ -743,11 +836,26 @@ nextApp.prepare().then(() => {
 
   // Mutex for single-flight token refresh
   let inFlightRefreshPromise = null;
+  let lastRefreshTimestamp = 0;
 
   /**
    * Core Function: Execute Refresh Token with Crazii API using the 3-day Refresh Token
    */
   async function executeRefreshToken(customRefreshToken = null, force = false) {
+    const nowMs = Date.now();
+    // Guard against rapid-fire refresh loops (minimum 10s cooldown)
+    if (force && (nowMs - lastRefreshTimestamp < 10000)) {
+      console.log(`[Token Refresh] ⏳ Refresh requested too soon (${Math.round((nowMs - lastRefreshTimestamp) / 1000)}s ago). Reusing active token.`);
+      const currentAuth = getActiveAuthToken();
+      return {
+        success: true,
+        token: currentAuth,
+        accessToken: currentAuth,
+        accessPayload: decodeJwt(currentAuth),
+        refreshPayload: decodeJwt(getActiveRefreshToken())
+      };
+    }
+
     // If no custom token is passed and force is false, check if the current token is still valid (> 2 minutes left)
     if (!customRefreshToken && !force) {
       const currentAuth = getActiveAuthToken();
@@ -822,6 +930,7 @@ nextApp.prepare().then(() => {
         const decodedRefresh = decodeJwt(newRefreshToken || refreshToken);
 
         console.log(`[Token Refresh] 🎉 Got new Access Token! (Expires in ~15 mins: ${new Date((decodedAccess?.exp || 0) * 1000).toLocaleTimeString()})`);
+        lastRefreshTimestamp = Date.now();
 
         updateEnvTokens({
           authToken: newAccessToken,
@@ -1709,31 +1818,165 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     });
   });
 
-  // POST /api/payment/create (Create Cryptomus 45 USDT invoice)
-  app.post('/api/payment/create', requireAuthAndDevice, async (req, res) => {
+  // POST /api/payment/create-invoice & POST /api/payment/create (Create Direct Crypto Payment)
+  const handleCreatePaymentInvoice = async (req, res) => {
     const user = req.user;
     const userId = user.id || user.sub;
     const orderId = `SUB_${userId}_${Date.now()}`;
-    const reqProto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    const reqHost = req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`;
-    const baseUrl = `${reqProto}://${reqHost}`;
+    const baseUrl = getAppBaseUrl(req);
+    const { amount = "1.00", currency = "usd", network = "bsc", pay_currency } = req.body || {};
 
-    const payload = {
-      amount: "45.00",
-      currency: "USDT",
-      order_id: orderId,
-      url_return: `${baseUrl}/subscription?order_id=${orderId}&status=success`,
-      url_callback: `${baseUrl}/api/payment/webhook`,
-      is_payment_multiple: false,
-      lifetime: 3600,
-      additional_data: JSON.stringify({ userId: userId, email: user.email })
-    };
+    // Map network to NOWPayments currency tickers (usdtbsc = BSC/BEP20, usdterc20 = Ethereum/ERC20)
+    let selectedPayCurrency = 'usdtbsc';
+    if (pay_currency) {
+      selectedPayCurrency = pay_currency.toLowerCase();
+    } else if (network === 'eth' || network === 'erc20' || network === 'usdterc20') {
+      selectedPayCurrency = 'usdterc20';
+    } else {
+      selectedPayCurrency = 'usdtbsc';
+    }
 
+    const networkName = selectedPayCurrency === 'usdterc20' ? 'ETH (ERC-20)' : 'BSC (BEP-20)';
+
+    console.log(`[Payment] 💳 Initiating direct payment for ${user.email} (Order: ${orderId}, Network: ${networkName}, Amount: $${amount}, BaseUrl: ${baseUrl})...`);
+
+    // 1. Try NOWPayments Direct Invoice-Payment Flow (/v1/invoice + /v1/invoice-payment)
+    if (NOWPAYMENTS_API_KEY) {
+      try {
+        let numAmount = parseFloat(amount) || 1.00;
+        // ETH ERC-20 has a network minimal requirement of ~1.16 USDT
+        if (selectedPayCurrency === 'usdterc20' && numAmount < 2.00) {
+          numAmount = 2.00;
+        }
+
+        const invPayload = {
+          price_amount: numAmount,
+          price_currency: currency.toLowerCase(),
+          order_id: orderId,
+          order_description: `TRADEWH Pro Tier - 1 Month ($${numAmount}) [USDT ${networkName}]`,
+          ipn_callback_url: `${baseUrl}/api/payment/webhook`,
+          success_url: `${baseUrl}/subscription?status=success&order_id=${orderId}`,
+          cancel_url: `${baseUrl}/subscription?status=cancel&order_id=${orderId}`
+        };
+
+        const invResponse = await fetch('https://api.nowpayments.io/v1/invoice', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': NOWPAYMENTS_API_KEY
+          },
+          body: JSON.stringify(invPayload)
+        });
+
+        const invData = await invResponse.json();
+
+        if (invResponse.ok && invData.id) {
+          const invoiceId = String(invData.id);
+
+          // Step 2: Create payment bound to this invoice for the selected currency
+          const payResponse = await fetch('https://api.nowpayments.io/v1/invoice-payment', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': NOWPAYMENTS_API_KEY
+            },
+            body: JSON.stringify({
+              iid: invoiceId,
+              pay_currency: selectedPayCurrency
+            })
+          });
+
+          const payData = await payResponse.json();
+
+          if (payResponse.ok && payData.payment_id) {
+            const paymentId = String(payData.payment_id);
+            const directPaymentUrl = `https://nowpayments.io/payment?iid=${invoiceId}&paymentId=${paymentId}`;
+
+            await saveSubscriptionOrder({
+              order_id: orderId,
+              user_id: userId,
+              email: user.email,
+              amount: String(numAmount),
+              currency: `USDT (${networkName})`,
+              status: 'pending',
+              payment_url: directPaymentUrl,
+              cryptomus_uuid: paymentId
+            });
+
+            console.log(`[NOWPayments] ✅ Direct Invoice-Payment created: ${directPaymentUrl} (IID: ${invoiceId}, PID: ${paymentId}, Network: ${networkName}, Amount: $${numAmount})`);
+
+            return res.json({
+              success: true,
+              orderId: orderId,
+              invoiceId: invoiceId,
+              paymentId: paymentId,
+              paymentUrl: directPaymentUrl,
+              invoiceUrl: directPaymentUrl,
+              payAddress: payData.pay_address,
+              payAmount: payData.pay_amount,
+              payCurrency: payData.pay_currency || selectedPayCurrency,
+              network: selectedPayCurrency === 'usdterc20' ? 'eth' : 'bsc',
+              networkName: networkName,
+              expirationDate: payData.expiration_estimate_date || null,
+              amount: String(numAmount)
+            });
+          } else {
+            console.warn('[NOWPayments /v1/invoice-payment notice]', payData);
+            if (payData.message && (payData.message.includes('less than minimal') || payData.message.includes('minimal') || payData.message.includes('too small'))) {
+              return res.status(400).json({
+                success: false,
+                message: `Mức nạp tối thiểu của mạng ${networkName} là cao hơn $${amount} do phí gas. Khuyên bạn nên chọn mạng BSC (BEP-20) chỉ từ $0.07!`,
+                raw: payData
+              });
+            }
+
+            // Fallback to standard invoice URL if invoice-payment couldn't be bound
+            const fallbackInvUrl = invData.invoice_url || `https://nowpayments.io/payment?iid=${invoiceId}`;
+            await saveSubscriptionOrder({
+              order_id: orderId,
+              user_id: userId,
+              email: user.email,
+              amount: String(numAmount),
+              currency: `USDT (${networkName})`,
+              status: 'pending',
+              payment_url: fallbackInvUrl,
+              cryptomus_uuid: invoiceId
+            });
+
+            return res.json({
+              success: true,
+              orderId: orderId,
+              invoiceId: invoiceId,
+              paymentUrl: fallbackInvUrl,
+              invoiceUrl: fallbackInvUrl,
+              network: selectedPayCurrency === 'usdterc20' ? 'eth' : 'bsc',
+              networkName: networkName,
+              amount: String(numAmount)
+            });
+          }
+        } else {
+          console.warn('[NOWPayments /v1/invoice notice]', invData);
+        }
+      } catch (err) {
+        console.error('[NOWPayments Exception]', err.message);
+      }
+    }
+
+    // 2. Fallback to Cryptomus Gateway if configured
     if (CRYPTOMUS_MERCHANT_ID && CRYPTOMUS_PAYMENT_API_KEY) {
       try {
-        const sign = generateCryptomusSignature(payload, CRYPTOMUS_PAYMENT_API_KEY);
-        console.log(`[Cryptomus] 💳 Creating invoice for user ${user.email} (Order: ${orderId})...`);
+        const payload = {
+          amount: String(amount || "45.00"),
+          currency: "USDT",
+          order_id: orderId,
+          url_return: `${baseUrl}/subscription?order_id=${orderId}&status=success`,
+          url_callback: `${baseUrl}/api/payment/webhook`,
+          is_payment_multiple: false,
+          lifetime: 3600,
+          additional_data: JSON.stringify({ userId: userId, email: user.email })
+        };
 
+        const sign = generateCryptomusSignature(payload, CRYPTOMUS_PAYMENT_API_KEY);
         const response = await fetch('https://api.cryptomus.com/v1/payment', {
           method: 'POST',
           headers: {
@@ -1750,7 +1993,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
             order_id: orderId,
             user_id: userId,
             email: user.email,
-            amount: "45.00",
+            amount: String(amount || "45.00"),
             currency: "USDT",
             status: 'pending',
             payment_url: data.result.url,
@@ -1760,132 +2003,359 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           return res.json({
             success: true,
             orderId: orderId,
+            invoiceUrl: data.result.url,
             paymentUrl: data.result.url,
             uuid: data.result.uuid
-          });
-        } else {
-          console.error('[Cryptomus Create Error]', data);
-          return res.status(400).json({
-            success: false,
-            message: data.message || 'Không thể tạo đơn hàng trên Cryptomus',
-            raw: data
           });
         }
       } catch (err) {
         console.error('[Cryptomus API Exception]', err.message);
-        return res.status(500).json({ success: false, message: 'Lỗi kết nối cổng thanh toán Cryptomus', error: err.message });
       }
-    } else {
-      // Fallback Demo / Simulated Payment Flow for development & testing
-      const mockUrl = `https://pay.cryptomus.com/pay/mock_${orderId}`;
-      await saveSubscriptionOrder({
-        order_id: orderId,
-        user_id: userId,
-        email: user.email,
-        amount: "45.00",
-        currency: "USDT",
-        status: 'pending',
-        payment_url: mockUrl,
-        is_mock: true
-      });
-
-      return res.json({
-        success: true,
-        orderId: orderId,
-        paymentUrl: mockUrl,
-        is_mock: true,
-        message: 'Chế độ mô phỏng Cryptomus (chưa cấu hình API Key)'
-      });
     }
-  });
 
-  // POST /api/payment/webhook (Cryptomus IPN Payment Callback)
-  app.post('/api/payment/webhook', async (req, res) => {
+    // 3. Fallback Demo / Simulated Payment Flow for development & testing
+    const mockUrl = `https://nowpayments.io/payment/?iid=mock_${orderId}`;
+    await saveSubscriptionOrder({
+      order_id: orderId,
+      user_id: userId,
+      email: user.email,
+      amount: String(amount || "15.00"),
+      currency: "USD",
+      status: 'pending',
+      payment_url: mockUrl,
+      is_mock: true
+    });
+
+    return res.json({
+      success: true,
+      orderId: orderId,
+      invoiceUrl: mockUrl,
+      paymentUrl: mockUrl,
+      is_mock: true,
+      message: 'Chế độ mô phỏng NOWPayments (chưa cấu hình NOWPAYMENTS_API_KEY)'
+    });
+  };
+
+  app.post('/api/payment/create-invoice', requireAuthAndDevice, handleCreatePaymentInvoice);
+  app.post('/api/payment/create', requireAuthAndDevice, handleCreatePaymentInvoice);
+
+  /**
+   * Core Idempotent Payment Activation Processor
+   * Used by both Webhook and Active Polling to guarantee:
+   * 1. 100% Idempotency: Never re-activates an already-processed order
+   * 2. Never auto-renews when expired: Once order is marked 'finished', subsequent calls do nothing
+   * 3. Comprehensive user lookup: by order_id, existingOrder.user_id, or email
+   * 4. Updates User table and SubscriptionOrder table in Prisma & Supabase
+   */
+  async function processSuccessfulPayment({
+    orderId,
+    paymentId,
+    paymentStatus,
+    actuallyPaid,
+    priceAmount,
+    payCurrency,
+    source = 'Webhook',
+    req = null
+  }) {
+    console.log(`[Payment Processor] ⚡ Processing payment notification from [${source}] for Order [${orderId || paymentId}] (Status: ${paymentStatus})...`);
+
+    // 1. Locate the Order in DB
+    let existingOrder = orderId ? await findSubscriptionOrder(orderId) : null;
+    if (!existingOrder && paymentId) {
+      existingOrder = await findSubscriptionOrderByPaymentId(String(paymentId));
+    }
+
+    const resolvedOrderId = orderId || existingOrder?.order_id;
+
+    // 2. STRICT IDEMPOTENCY GUARD:
+    // If order was ALREADY finished or confirmed, EXIT IMMEDIATELY. DO NOT TOUCH USER EXPIRY!
+    if (existingOrder && (existingOrder.status === 'finished' || existingOrder.status === 'confirmed')) {
+      console.log(`[Payment Processor] ℹ️ Order [${resolvedOrderId}] was ALREADY activated on ${existingOrder.paid_at || existingOrder.updated_at}. Skipping duplicate processing.`);
+      return {
+        success: true,
+        alreadyProcessed: true,
+        orderId: resolvedOrderId,
+        status: existingOrder.status,
+        message: 'Order was already processed previously'
+      };
+    }
+
+    // 3. Locate Target User
+    let userId = null;
+    if (resolvedOrderId && resolvedOrderId.startsWith('SUB_')) {
+      const parts = resolvedOrderId.split('_');
+      userId = parts.slice(1, -1).join('_') || parts[1];
+    }
+
+    let targetUser = (userId ? await findUserById(userId) : null) || (userId ? await findUserByEmail(userId) : null);
+    if (!targetUser && existingOrder?.user_id) {
+      targetUser = (await findUserById(existingOrder.user_id)) || (await findUserByEmail(existingOrder.email));
+    }
+    if (!targetUser && existingOrder?.email) {
+      targetUser = await findUserByEmail(existingOrder.email);
+    }
+
+    if (!targetUser) {
+      console.warn(`[Payment Processor] ⚠️ Could not identify user for order [${resolvedOrderId}]. Updating order status only.`);
+      if (existingOrder) {
+        await saveSubscriptionOrder({
+          ...existingOrder,
+          status: paymentStatus === 'sending' ? 'confirmed' : paymentStatus,
+          paid_at: new Date().toISOString()
+        });
+      }
+      return { success: false, message: 'User not found for order', orderId: resolvedOrderId };
+    }
+
+    // 4. Calculate +30 Days Subscription Expiry
+    const currentExpiryTime = targetUser.subscriptionExpiry ? new Date(targetUser.subscriptionExpiry).getTime() : 0;
+    const nowTime = Date.now();
+    const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
+    const newExpiry = new Date(baseTime + (30 * 24 * 3600 * 1000)).toISOString();
+
+    const updatedUser = {
+      ...targetUser,
+      subscriptionStatus: true,
+      subscriptionExpiry: newExpiry
+    };
+
+    // 5. Persist to Database (Prisma + Supabase)
+    await saveUserToDb(updatedUser);
+    await recordUserLoginToSupabase(updatedUser, req);
+
+    // 6. Update Subscription Order to 'finished' or 'confirmed'
+    const finalStatus = paymentStatus === 'sending' ? 'confirmed' : (paymentStatus || 'finished');
+    const updatedOrder = {
+      order_id: resolvedOrderId || `SUB_${targetUser.id}_${Date.now()}`,
+      user_id: targetUser.id || targetUser.sub,
+      email: targetUser.email,
+      status: finalStatus,
+      amount: String(priceAmount || actuallyPaid || existingOrder?.amount || "15.00"),
+      currency: payCurrency || existingOrder?.currency || "USDT",
+      payment_url: existingOrder?.payment_url || null,
+      cryptomus_uuid: String(paymentId || existingOrder?.cryptomus_uuid || ''),
+      paid_at: new Date().toISOString()
+    };
+    await saveSubscriptionOrder(updatedOrder);
+
+    console.log(`[Payment Processor] 🎉 Subscription ACTIVATED for ${targetUser.email} until ${newExpiry} via [${source}] (Order: ${resolvedOrderId})`);
+
+    return {
+      success: true,
+      activated: true,
+      orderId: resolvedOrderId,
+      status: finalStatus,
+      newExpiry,
+      email: targetUser.email
+    };
+  }
+
+  // POST /api/payment/webhook & /api/payment/nowpayments-webhook (IPN Webhook Callback)
+  const handlePaymentWebhook = async (req, res) => {
     try {
-      const incomingSign = req.headers['sign'];
+      const nowpaymentsSig = req.headers['x-nowpayments-sig'];
+      const cryptomusSign = req.headers['sign'];
       const body = req.body;
 
       if (!body) {
-        return res.status(400).json({ success: false, message: 'Missing body' });
+        return res.status(400).json({ success: false, message: 'Missing webhook body' });
       }
 
-      // Verify signature if key is configured
-      if (CRYPTOMUS_PAYMENT_API_KEY) {
-        const payloadToSign = { ...body };
-        delete payloadToSign.sign;
-        const expectedSign = generateCryptomusSignature(payloadToSign, CRYPTOMUS_PAYMENT_API_KEY);
+      console.log(`[Payment Webhook] 📥 Received webhook notification...`);
 
-        if (incomingSign !== expectedSign && body.sign !== expectedSign) {
-          console.warn(`[Cryptomus Webhook] ❌ Invalid signature received: ${incomingSign}`);
-          return res.status(400).json({ success: false, message: 'Invalid signature' });
-        }
-      }
-
-      const { status, order_id, additional_data } = body;
-      console.log(`[Cryptomus Webhook] 📥 Received webhook for Order ${order_id} with status: ${status}`);
-
-      if (status === 'paid' || status === 'paid_over' || status === 'paid_simulated') {
-        let meta = {};
-        try {
-          meta = typeof additional_data === 'string' ? JSON.parse(additional_data) : (additional_data || {});
-        } catch (e) {}
-
-        const userId = meta.userId;
-        const email = meta.email;
-
-        let targetUser = (await findUserById(userId)) || (await findUserByEmail(email));
-        if (!targetUser && userId) {
-          targetUser = { id: userId, email: email || 'user@tradewh.com' };
+      // A. Handle NOWPayments IPN
+      if (nowpaymentsSig || body.payment_status) {
+        if (NOWPAYMENTS_IPN_SECRET_KEY && nowpaymentsSig) {
+          const isValid = verifyNowPaymentsSignature(body, nowpaymentsSig, NOWPAYMENTS_IPN_SECRET_KEY);
+          if (!isValid) {
+            console.warn(`[NOWPayments IPN] ❌ Invalid signature received: ${nowpaymentsSig}`);
+            return res.status(400).json({ success: false, message: 'Invalid NOWPayments signature' });
+          }
         }
 
-        if (targetUser) {
-          const currentExpiryTime = targetUser.subscriptionExpiry ? new Date(targetUser.subscriptionExpiry).getTime() : 0;
-          const nowTime = Date.now();
-          // Add +30 days (either from now or stacked onto current valid expiry)
-          const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
-          const newExpiry = new Date(baseTime + (30 * 24 * 3600 * 1000)).toISOString();
+        const { payment_status, order_id, actually_paid, price_amount, pay_currency, payment_id } = body;
+        console.log(`[NOWPayments IPN] 📥 Order [${order_id || payment_id}] status: ${payment_status} (Paid: ${actually_paid} ${pay_currency})`);
 
-          const updated = {
-            ...targetUser,
-            subscriptionStatus: true,
-            subscriptionExpiry: newExpiry
-          };
-
-          await recordUserLoginToSupabase(updated, req);
-
-          await saveSubscriptionOrder({
-            order_id: order_id,
-            user_id: targetUser.id || targetUser.sub,
-            email: targetUser.email,
-            status: status,
-            amount: body.amount || "45.00",
-            currency: body.currency || "USDT",
-            paid_at: new Date().toISOString()
+        if (payment_status === 'finished' || payment_status === 'confirmed' || payment_status === 'sending' || payment_status === 'simulated_finished') {
+          const result = await processSuccessfulPayment({
+            orderId: order_id,
+            paymentId: payment_id,
+            paymentStatus: payment_status,
+            actuallyPaid: actually_paid,
+            priceAmount: price_amount,
+            payCurrency: pay_currency,
+            source: 'NOWPayments Webhook IPN',
+            req
           });
-
-          console.log(`[Cryptomus Webhook] 🎉 Subscription ACTIVATED for ${targetUser.email} until ${newExpiry}`);
+          return res.json(result);
         }
+
+        return res.json({ success: true, message: `NOWPayments IPN received (status: ${payment_status})` });
       }
 
-      return res.json({ success: true, message: 'Webhook processed' });
+      // B. Handle Cryptomus IPN
+      if (cryptomusSign || body.status) {
+        if (CRYPTOMUS_PAYMENT_API_KEY) {
+          const payloadToSign = { ...body };
+          delete payloadToSign.sign;
+          const expectedSign = generateCryptomusSignature(payloadToSign, CRYPTOMUS_PAYMENT_API_KEY);
+          if (cryptomusSign !== expectedSign && body.sign !== expectedSign) {
+            console.warn(`[Cryptomus Webhook] ❌ Invalid signature received: ${cryptomusSign}`);
+            return res.status(400).json({ success: false, message: 'Invalid signature' });
+          }
+        }
+
+        const { status, order_id, additional_data } = body;
+        if (status === 'paid' || status === 'paid_over' || status === 'paid_simulated') {
+          let meta = {};
+          try {
+            meta = typeof additional_data === 'string' ? JSON.parse(additional_data) : (additional_data || {});
+          } catch (e) {}
+
+          const result = await processSuccessfulPayment({
+            orderId: order_id,
+            paymentStatus: status,
+            actuallyPaid: body.amount,
+            priceAmount: body.amount,
+            payCurrency: body.currency,
+            source: 'Cryptomus Webhook',
+            req
+          });
+          return res.json(result);
+        }
+
+        return res.json({ success: true, message: 'Cryptomus webhook processed' });
+      }
+
+      return res.json({ success: true, message: 'Webhook received' });
     } catch (err) {
-      console.error('[Cryptomus Webhook Error]', err.message);
+      console.error('[Payment Webhook Error]', err.message);
       return res.status(500).json({ success: false, error: err.message });
     }
-  });
+  };
 
-  // GET /api/payment/status/:orderId (Check order status)
-  app.get('/api/payment/status/:orderId', requireAuthAndDevice, async (req, res) => {
+  app.post('/api/payment/webhook', handlePaymentWebhook);
+  app.post('/api/payment/nowpayments-webhook', handlePaymentWebhook);
+
+  // GET /api/payment/status/:orderId (Check order status & active NOWPayments fallback sync)
+  app.get('/api/payment/status/:orderId', async (req, res) => {
     const { orderId } = req.params;
-    const order = await findSubscriptionOrder(orderId);
+    let order = await findSubscriptionOrder(orderId);
+    if (!order) {
+      order = await findSubscriptionOrderByPaymentId(orderId);
+    }
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng' });
     }
 
+    // 1. If order was ALREADY finished or confirmed in DB, return immediately
+    if (order.status === 'finished' || order.status === 'confirmed') {
+      return res.json({
+        success: true,
+        order,
+        activated: true,
+        alreadyProcessed: true
+      });
+    }
+
+    // 2. If order is still 'pending', proactively query NOWPayments API directly
+    const paymentId = order.cryptomus_uuid;
+    if (paymentId && NOWPAYMENTS_API_KEY) {
+      try {
+        const checkRes = await fetch(`https://api.nowpayments.io/v1/payment/${paymentId}`, {
+          method: 'GET',
+          headers: { 'x-api-key': NOWPAYMENTS_API_KEY }
+        });
+
+        if (checkRes.ok) {
+          const checkData = await checkRes.json();
+          const remoteStatus = checkData?.payment_status;
+          console.log(`[NOWPayments Active Check] Order [${orderId}] Payment [${paymentId}] Remote Status:`, remoteStatus);
+
+          if (remoteStatus === 'finished' || remoteStatus === 'confirmed' || remoteStatus === 'sending') {
+            const activationResult = await processSuccessfulPayment({
+              orderId: order.order_id,
+              paymentId: paymentId,
+              paymentStatus: remoteStatus,
+              actuallyPaid: checkData.actually_paid,
+              priceAmount: checkData.price_amount,
+              payCurrency: checkData.pay_currency,
+              source: 'NOWPayments Active Check Fallback',
+              req
+            });
+
+            const freshOrder = await findSubscriptionOrder(order.order_id);
+            return res.json({
+              success: true,
+              order: freshOrder || order,
+              activated: true,
+              message: 'Thanh toán thành công! Gói cước đã được kích hoạt.'
+            });
+          }
+        }
+      } catch (err) {
+        console.warn(`[NOWPayments Active Check Notice]`, err.message);
+      }
+    }
+
     return res.json({
       success: true,
-      order
+      order,
+      activated: false
+    });
+  });
+
+  // POST /api/payment/simulate-confirm (Admin / Dev Test Simulation)
+  app.post('/api/payment/simulate-confirm', requireAuthAndDevice, async (req, res) => {
+    const user = req.user;
+    const { orderId } = req.body || {};
+    const isAdmin = isUserAdmin(user);
+
+    if (!isAdmin && process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ success: false, message: 'Chỉ Admin mới có quyền mô phỏng thanh toán.' });
+    }
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp orderId.' });
+    }
+
+    let userId = user.id || user.sub;
+    if (orderId.startsWith('SUB_')) {
+      const parts = orderId.split('_');
+      userId = parts.slice(1, -1).join('_') || parts[1] || userId;
+    }
+
+    let targetUser = (await findUserById(userId)) || (await findUserByEmail(userId)) || user;
+    const currentExpiryTime = targetUser.subscriptionExpiry ? new Date(targetUser.subscriptionExpiry).getTime() : 0;
+    const nowTime = Date.now();
+    const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
+    const newExpiry = new Date(baseTime + (30 * 24 * 3600 * 1000)).toISOString();
+
+    const updated = {
+      ...targetUser,
+      subscriptionStatus: true,
+      subscriptionExpiry: newExpiry
+    };
+
+    await recordUserLoginToSupabase(updated, req);
+
+    await saveSubscriptionOrder({
+      order_id: orderId,
+      user_id: targetUser.id || targetUser.sub,
+      email: targetUser.email,
+      status: 'finished',
+      amount: "15.00",
+      currency: "USD",
+      paid_at: new Date().toISOString()
+    });
+
+    console.log(`[Payment Simulation] ⚡ Order ${orderId} SIMULATED & CONFIRMED for ${targetUser.email}`);
+
+    return res.json({
+      success: true,
+      message: `Đã mô phỏng thanh toán thành công cho đơn hàng ${orderId}! Gói cước đã được kích hoạt +30 ngày.`,
+      expiry: newExpiry
     });
   });
 
@@ -2361,6 +2831,13 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       }
     });
 
+    let lastKickedReason = null;
+
+    targetSocket.on('kicked', (msg) => {
+      lastKickedReason = msg || 'Another login detected';
+      console.warn(`[WS Relay] ⚠️ Bị máy chủ Crazii ngắt kết nối (Kicked): "${lastKickedReason}". (Tài khoản đang mở đồng thời trên crazii.com hoặc trên Render)`);
+    });
+
     targetSocket.on('connect_error', (err) => {
       isUpstreamConnected = false;
       console.error(`[WS Relay] Connection error:`, err.message);
@@ -2370,37 +2847,47 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         err.message.includes('401') || 
         err.message.includes('403') || 
         err.message.toLowerCase().includes('unauthorized') || 
-        err.message.toLowerCase().includes('forbidden') ||
-        err.message.toLowerCase().includes('websocket error')
+        err.message.toLowerCase().includes('forbidden')
       );
 
       if (isAuthErr && activeChannels.size > 0) {
         clearTimeout(upstreamReconnectTimer);
         upstreamReconnectTimer = setTimeout(async () => {
           if (activeChannels.size > 0) {
-            console.log(`[WS Relay] 🔑 Auth/Handshake error detected. Refreshing token and reconnecting...`);
+            console.log(`[WS Relay] 🔑 Auth error detected. Refreshing token and reconnecting...`);
             await executeRefreshToken(null, true);
             connectUpstreamWebSocket();
           }
-        }, 2000);
+        }, 3000);
       }
     });
 
     targetSocket.on('disconnect', (reason) => {
       isUpstreamConnected = false;
       console.warn(`[WS Relay] Disconnected from upstream:`, reason);
-      io.emit('upstream_status', { connected: false, reason: reason });
+      io.emit('upstream_status', { connected: false, reason: reason, kicked: lastKickedReason });
 
-      // When Crazii server closes the socket (e.g. 15-min token expiration), force token refresh & reconnect
+      // Reconnect upstream quickly
       if (activeChannels.size > 0) {
         clearTimeout(upstreamReconnectTimer);
+        lastKickedReason = null;
+
         upstreamReconnectTimer = setTimeout(async () => {
           if (activeChannels.size > 0) {
-            console.log(`[WS Relay] 🔄 Re-authenticating & reconnecting upstream WebSocket (Reason: ${reason})...`);
-            await executeRefreshToken(null, true);
+            const auth = getActiveAuthToken();
+            const jwt = decodeJwt(auth);
+            const nowSec = Math.floor(Date.now() / 1000);
+            const isExpiring = !jwt || !jwt.exp || (jwt.exp - nowSec <= 60);
+
+            if (isExpiring) {
+              console.log(`[WS Relay] ⏳ Token expiring (${jwt?.exp ? jwt.exp - nowSec : 0}s left). Refreshing before reconnect...`);
+              await executeRefreshToken(null, true);
+            } else {
+              console.log(`[WS Relay] 🔄 Reconnecting upstream WebSocket (Token valid for ${jwt.exp - nowSec}s, Reason: ${reason})...`);
+            }
             connectUpstreamWebSocket();
           }
-        }, 1500);
+        }, 1000);
       }
     });
   }
@@ -2418,6 +2905,54 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     }
     isUpstreamConnected = false;
     activeChannels.clear();
+    channelSubscribers.clear();
+  }
+
+  // Tracking channels monitored permanently by Telegram bot
+  const botMonitoredChannels = new Set();
+  // Reference counter for channel subscriptions: channel -> Set of socketId
+  const channelSubscribers = new Map();
+
+  function addClientSubscription(channel, socketId) {
+    if (!channelSubscribers.has(channel)) {
+      channelSubscribers.set(channel, new Set());
+    }
+    const subs = channelSubscribers.get(channel);
+    const wasEmpty = subs.size === 0;
+    subs.add(socketId);
+    activeChannels.add(channel);
+    return wasEmpty;
+  }
+
+  function removeClientSubscription(channel, socketId) {
+    if (!channelSubscribers.has(channel)) return false;
+    const subs = channelSubscribers.get(channel);
+    subs.delete(socketId);
+    if (subs.size === 0) {
+      channelSubscribers.delete(channel);
+      if (!botMonitoredChannels.has(channel)) {
+        activeChannels.delete(channel);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function cleanupClientAllSubscriptions(socketId) {
+    for (const [channel, subs] of channelSubscribers.entries()) {
+      if (subs.has(socketId)) {
+        subs.delete(socketId);
+        if (subs.size === 0) {
+          channelSubscribers.delete(channel);
+          if (!botMonitoredChannels.has(channel)) {
+            activeChannels.delete(channel);
+            if (targetSocket && targetSocket.connected) {
+              targetSocket.emit('unsubscribe', channel);
+            }
+          }
+        }
+      }
+    }
   }
 
   // Helper to sync bot monitored symbols into activeChannels
@@ -2425,9 +2960,14 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     if (telegramSignalBot.config.enabled && Array.isArray(telegramSignalBot.config.monitoredSymbols)) {
       telegramSignalBot.config.monitoredSymbols.forEach(sym => {
         if (sym && typeof sym === 'string') {
-          activeChannels.add(sym.trim());
-          const base = sym.split('_')[0];
-          if (base) activeChannels.add(base);
+          const clean = sym.trim();
+          botMonitoredChannels.add(clean);
+          activeChannels.add(clean);
+          const base = clean.split('_')[0];
+          if (base) {
+            botMonitoredChannels.add(base);
+            activeChannels.add(base);
+          }
         }
       });
       if (activeChannels.size > 0 && (!targetSocket || !targetSocket.connected)) {
@@ -2445,13 +2985,13 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         const auth = getActiveAuthToken();
         const jwt = decodeJwt(auth);
         const nowSec = Math.floor(Date.now() / 1000);
-        if (!jwt || !jwt.exp || (jwt.exp - nowSec <= 120)) {
+        if (!jwt || !jwt.exp || (jwt.exp - nowSec <= 60)) {
           await executeRefreshToken(null, true);
         }
         connectUpstreamWebSocket();
       }
     }
-  }, 15000);
+  }, 30000);
 
   // Socket.IO Strict Session Authentication & Single-Device Limit Middleware
   io.use(async (socket, next) => {
@@ -2465,7 +3005,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     if (sessionPayload) {
       const dbUser = (await findUserByEmail(sessionPayload.email)) || (await findUserById(sessionPayload.sub));
       if (dbUser) {
-        if (dbUser.currentDeviceId && sessionPayload.deviceId && dbUser.currentDeviceId !== sessionPayload.deviceId) {
+        if (!ALLOW_CONCURRENT_SESSIONS && dbUser.currentDeviceId && sessionPayload.deviceId && dbUser.currentDeviceId !== sessionPayload.deviceId) {
           console.warn(`[Socket Auth] ❌ Rejected socket connection due to device mismatch: ${sessionPayload.email}`);
           return next(new Error('DEVICE_SESSION_TERMINATED: Logged in from another device.'));
         }
@@ -2509,30 +3049,33 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
 
     clientSocket.on('subscribe', (channel) => {
       if (channel && typeof channel === 'string') {
-        activeChannels.add(channel);
-        activeChannels.add('price');
-        if (!targetSocket || !targetSocket.connected) {
-          connectUpstreamWebSocket();
-        } else {
-          targetSocket.emit('subscribe', channel);
-          targetSocket.emit('subscribe', 'price');
+        const cleanChan = channel.trim();
+        if (cleanChan && cleanChan.toLowerCase() !== 'price') {
+          const isFirstSub = addClientSubscription(cleanChan, clientSocket.id);
+          if (!targetSocket || !targetSocket.connected) {
+            connectUpstreamWebSocket();
+          } else if (isFirstSub) {
+            targetSocket.emit('subscribe', cleanChan);
+          }
         }
       }
     });
 
     clientSocket.on('unsubscribe', (channel) => {
       if (channel && typeof channel === 'string') {
-        activeChannels.delete(channel);
-        if (targetSocket && targetSocket.connected) {
-          targetSocket.emit('unsubscribe', channel);
+        const cleanChan = channel.trim();
+        const shouldUnsubUpstream = removeClientSubscription(cleanChan, clientSocket.id);
+        if (shouldUnsubUpstream && targetSocket && targetSocket.connected) {
+          targetSocket.emit('unsubscribe', cleanChan);
         }
-        if (activeChannels.size === 0) {
+        if (activeChannels.size === 0 && botMonitoredChannels.size === 0) {
           disconnectUpstreamWebSocket();
         }
       }
     });
 
     clientSocket.on('disconnect', () => {
+      cleanupClientAllSubscriptions(clientSocket.id);
       if (uId && activeUserSockets.has(uId)) {
         activeUserSockets.get(uId).delete(clientSocket);
         if (activeUserSockets.get(uId).size === 0) {
@@ -2541,7 +3084,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       }
 
       setTimeout(() => {
-        if (io.sockets.sockets.size === 0) {
+        if (io.sockets.sockets.size === 0 && botMonitoredChannels.size === 0) {
           disconnectUpstreamWebSocket();
         }
       }, 5000);

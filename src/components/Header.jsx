@@ -340,27 +340,26 @@ export default function Header({
             )}
           </div>
 
-          {/* Admin Management Button (Hidden for regular users) */}
-          {isAdmin && (
-            <Link
-              href="/subscription"
-              className="btn"
-              style={{
-                textDecoration: 'none',
-                background: 'rgba(203, 177, 147, 0.15)',
-                borderColor: 'rgba(203, 177, 147, 0.4)',
-                color: '#CBB193',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                fontWeight: '700'
-              }}
-              title="Quản Trị Viên: Tạo TK Dùng Thử & Quản Lý"
-            >
-              <span>👑</span>
-              <span>Quản Trị</span>
-            </Link>
-          )}
+          {/* Subscription / Membership / Admin Button */}
+          <Link
+            href="/subscription"
+            className="btn subscription-btn-highlight"
+            style={{
+              textDecoration: 'none',
+              background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
+              borderColor: 'rgba(203, 177, 147, 0.45)',
+              color: '#CBB193',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontWeight: '700',
+              boxShadow: '0 1px 6px rgba(203, 177, 147, 0.15)'
+            }}
+            title={isAdmin ? "Quản Trị Viên: Tạo TK Dùng Thử & Quản Lý" : "Đăng Ký & Quản Lý Gói Pro"}
+          >
+            <span>{isAdmin ? '👑' : '💎'}</span>
+            <span>{isAdmin ? 'Quản Trị' : 'Gói Đăng Ký'}</span>
+          </Link>
 
           {/* Fullscreen Toggle Button */}
           <button
@@ -602,23 +601,32 @@ export default function Header({
             </div>
           </div>
 
-          {/* Group 5: Admin Management Panel (If Admin) */}
-          {isAdmin && (
-            <div className="mobile-drawer-group">
-              <div className="mobile-group-title">
-                <span>👑</span>
-                <span>QUẢN TRỊ VIÊN</span>
-              </div>
-              <Link
-                href="/subscription"
-                className="mobile-admin-btn"
-                onClick={() => setIsMobileDrawerOpen(false)}
-              >
-                <span>👑</span>
-                <span>Tạo Tài Khoản Dùng Thử & Quản Trị</span>
-              </Link>
+          {/* Group 5: Subscription & Admin Panel */}
+          <div className="mobile-drawer-group">
+            <div className="mobile-group-title">
+              <span>{isAdmin ? '👑' : '💎'}</span>
+              <span>{isAdmin ? 'QUẢN TRỊ VIÊN' : 'GÓI THÀNH VIÊN PRO'}</span>
             </div>
-          )}
+            <Link
+              href="/subscription"
+              className="mobile-admin-btn"
+              onClick={() => setIsMobileDrawerOpen(false)}
+              style={{
+                textDecoration: 'none',
+                background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
+                borderColor: 'rgba(203, 177, 147, 0.45)',
+                color: '#CBB193',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                fontWeight: '700'
+              }}
+            >
+              <span>{isAdmin ? '👑' : '💎'}</span>
+              <span>{isAdmin ? 'Tạo Tài Khoản Dùng Thử & Quản Trị' : 'Đăng Ký Gói Pro ($15/Tháng)'}</span>
+            </Link>
+          </div>
 
           {/* Group 6: Logout Button (Elevated with bottom padding for mobile safe area) */}
           <div className="mobile-logout-wrapper">
@@ -643,6 +651,17 @@ export default function Header({
           display: flex;
           justify-content: space-between;
           align-items: center;
+        }
+
+        .subscription-btn-highlight {
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .subscription-btn-highlight:hover {
+          background: linear-gradient(135deg, rgba(203, 177, 147, 0.3) 0%, rgba(171, 151, 140, 0.15) 100%) !important;
+          border-color: #CBB193 !important;
+          color: #FFFFFF !important;
+          transform: translateY(-1px);
         }
 
         .mobile-header-avatar-btn {
