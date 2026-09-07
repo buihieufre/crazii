@@ -37,22 +37,29 @@ const CRYPTOMUS_PAYMENT_API_KEY = (process.env.CRYPTOMUS_PAYMENT_API_KEY || '').
 const APP_URL = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim();
 
 function getAppBaseUrl(req) {
-  if (process.env.NOWPAYMENTS_IPN_URL) {
-    return process.env.NOWPAYMENTS_IPN_URL.replace(/\/+$/, '');
+  // 1. Explicit override env takes highest priority (set this on Render dashboard)
+  if (process.env.APP_URL && !process.env.APP_URL.includes('localhost') && !process.env.APP_URL.includes('127.0.0.1')) {
+    return process.env.APP_URL.replace(/\/+$/, '');
   }
-  const host = req?.headers?.['x-forwarded-host'] || req?.headers?.host || '';
-  if (host.includes('crazii.onrender.com') || (process.env.NODE_ENV === 'production' && !host.includes('localhost') && !host.includes('127.0.0.1'))) {
-    return 'https://crazii.onrender.com';
+
+  // 2. Detect from x-forwarded-host (Render / Vercel / Nginx proxies set this)
+  const forwardedHost = req?.headers?.['x-forwarded-host'];
+  const forwardedProto = req?.headers?.['x-forwarded-proto'] || 'https';
+  if (forwardedHost && !forwardedHost.includes('localhost') && !forwardedHost.includes('127.0.0.1')) {
+    return `${forwardedProto}://${forwardedHost.split(',')[0].trim()}`;
   }
-  if (APP_URL && !APP_URL.includes('PLACEHOLDER')) {
-    return APP_URL.replace(/\/+$/, '');
+
+  // 3. Detect from host header
+  const host = req?.headers?.host || '';
+  if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+    return `https://${host}`;
   }
-  if (host.includes('localhost') || host.includes('127.0.0.1')) {
-    return `http://${host}`;
-  }
-  const proto = req?.headers?.['x-forwarded-proto'] || (host.includes('localhost') ? 'http' : 'https');
-  return `${proto}://${host || `localhost:${PORT}`}`;
+
+  // 4. Local fallback
+  const localHost = host || `localhost:${PORT}`;
+  return `http://${localHost}`;
 }
+
 
 function verifyNowPaymentsSignature(payload, signatureHeader, ipnSecret) {
   if (!signatureHeader || !ipnSecret) return false;
@@ -1877,7 +1884,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
               { email: dbUser.email }
             ],
             status: { in: ['pending', 'waiting'] },
-            created_at: { gte: new Date(Date.now() - 24 * 3600 * 1000) }
+            created_at: { gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) }
           },
           orderBy: { created_at: 'desc' }
         });
@@ -2729,7 +2736,115 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     return res.status(400).json(result);
   });
 
+  // POST /api/payment/sync (Public endpoint: Check & activate payment by orderId or paymentId)
+  // No auth required so it works even when user is redirected back from NOWPayments
+  app.post('/api/payment/sync', async (req, res) => {
+    try {
+      const { orderId, paymentId, order_id, payment_id } = req.body || {};
+      const targetOrderId = orderId || order_id;
+      const targetPaymentId = paymentId || payment_id;
+
+      if (!targetOrderId && !targetPaymentId) {
+        return res.status(400).json({ success: false, message: 'Cần cung cấp orderId hoặc paymentId' });
+      }
+
+      // 1. Look up order in DB
+      let order = targetOrderId ? await findSubscriptionOrder(targetOrderId) : null;
+      if (!order && targetPaymentId) {
+        order = await findSubscriptionOrderByPaymentId(String(targetPaymentId));
+      }
+      if (!order && targetOrderId) {
+        order = await findSubscriptionOrderByPaymentId(String(targetOrderId));
+      }
+
+      if (!order) {
+        return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng. Vui lòng liên hệ hỗ trợ.' });
+      }
+
+      // 2. Already done?
+      if (order.status === 'finished' || order.status === 'confirmed') {
+        return res.json({
+          success: true,
+          activated: true,
+          alreadyProcessed: true,
+          order,
+          message: 'Gói cước đã được kích hoạt trước đó.'
+        });
+      }
+
+      // 3. Check NOWPayments directly
+      const npPaymentId = order.cryptomus_uuid || targetPaymentId;
+      if (!npPaymentId || !NOWPAYMENTS_API_KEY) {
+        return res.json({ success: true, activated: false, order, message: 'Giao dịch đang chờ xác nhận từ blockchain. Vui lòng thử lại sau ít phút.' });
+      }
+
+      console.log(`[Payment Sync] 🔍 Querying NOWPayments for payment [${npPaymentId}]...`);
+      const npRes = await fetch(`https://api.nowpayments.io/v1/payment/${npPaymentId}`, {
+        method: 'GET',
+        headers: { 'x-api-key': NOWPAYMENTS_API_KEY }
+      });
+
+      if (!npRes.ok) {
+        const errBody = await npRes.text().catch(() => '');
+        console.warn(`[Payment Sync] NOWPayments API returned ${npRes.status}: ${errBody}`);
+        return res.json({ success: true, activated: false, order, message: `Đang chờ xác nhận blockchain (Status: ${order.status})` });
+      }
+
+      const npData = await npRes.json();
+      const remoteStatus = npData?.payment_status;
+      console.log(`[Payment Sync] 📊 NOWPayments status for [${npPaymentId}]: ${remoteStatus}`);
+
+      if (remoteStatus === 'finished' || remoteStatus === 'confirmed' || remoteStatus === 'sending') {
+        const result = await processSuccessfulPayment({
+          orderId: order.order_id,
+          paymentId: npPaymentId,
+          paymentStatus: remoteStatus,
+          actuallyPaid: npData.actually_paid,
+          priceAmount: npData.price_amount,
+          payCurrency: npData.pay_currency,
+          source: 'Manual Payment Sync API',
+          req
+        });
+
+        const freshOrder = await findSubscriptionOrder(order.order_id);
+        return res.json({
+          success: true,
+          activated: result.activated || result.alreadyProcessed,
+          alreadyProcessed: result.alreadyProcessed,
+          order: freshOrder || order,
+          subscriptionExpiry: result.newExpiry,
+          message: result.alreadyProcessed
+            ? 'Gói cước đã được kích hoạt trước đó.'
+            : '🎉 Gói cước Pro đã được kích hoạt thành công (+30 ngày)!'
+        });
+      }
+
+      // Partial states
+      const statusMessages = {
+        'waiting': 'Đang chờ nhận tiền từ ví của bạn...',
+        'confirming': 'Đang xác nhận trên blockchain (còn vài phút)...',
+        'partially_paid': '⚠️ Chỉ nhận được một phần tiền. Vui lòng liên hệ hỗ trợ.',
+        'failed': '❌ Giao dịch thất bại. Vui lòng tạo thanh toán mới.',
+        'refunded': '↩️ Giao dịch đã bị hoàn tiền.',
+        'expired': '⏰ Giao dịch đã hết hạn. Vui lòng tạo thanh toán mới.',
+      };
+
+      return res.json({
+        success: true,
+        activated: false,
+        order,
+        remoteStatus,
+        message: statusMessages[remoteStatus] || `Trạng thái giao dịch: ${remoteStatus}. Vui lòng đợi hoặc liên hệ hỗ trợ.`
+      });
+
+    } catch (err) {
+      console.error('[Payment Sync Error]', err.message);
+      return res.status(500).json({ success: false, message: 'Lỗi kiểm tra trạng thái: ' + err.message });
+    }
+  });
+
   // POST /api/admin/grant-trial (Admin 3-Day Trial Feature)
+
   app.post('/api/admin/grant-trial', requireAuthAndDevice, async (req, res) => {
     const requester = req.user;
     const adminKey = req.headers['x-admin-key'];

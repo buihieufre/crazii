@@ -194,13 +194,15 @@ function SubscriptionContent() {
           text: '🔄 Đang xác nhận giao dịch thanh toán từ NOWPayments...'
         });
 
-        const token = getSessionToken();
-        fetch(`/api/payment/status/${targetOrderId}`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        // Use /api/payment/sync — no auth required, directly queries NOWPayments
+        fetch('/api/payment/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: targetOrderId })
         })
           .then(res => res.json())
           .then(data => {
-            if (data.success && (data.activated || data.order?.status === 'finished' || data.order?.status === 'confirmed')) {
+            if (data.success && (data.activated || data.alreadyProcessed)) {
               try {
                 localStorage.removeItem('crazii_last_payment_order_id');
                 const stored = localStorage.getItem('crazii_user');
@@ -216,15 +218,6 @@ function SubscriptionContent() {
                 }
               } catch (e) {}
 
-              // If opened in child popup/tab, redirect parent and close self
-              if (typeof window !== 'undefined' && window.opener && !window.opener.closed) {
-                try {
-                  window.opener.location.href = '/?payment_success=1';
-                  window.close();
-                  return;
-                } catch (e) {}
-              }
-
               setMessage({
                 type: 'success',
                 text: '🎉 Giao dịch thành công! Gói thành viên Pro đã được kích hoạt (+30 ngày). Đang chuyển hướng sang biểu đồ...'
@@ -237,12 +230,12 @@ function SubscriptionContent() {
             } else {
               setMessage({
                 type: 'info',
-                text: 'Giao dịch đang chờ xác nhận từ mạng blockchain. Vui lòng đợi trong giây lát...'
+                text: data.message || 'Giao dịch đang chờ xác nhận từ mạng blockchain. Vui lòng đợi trong giây lát...'
               });
               fetchSubscriptionData();
             }
           })
-          .catch(err => {
+          .catch(() => {
             fetchSubscriptionData();
           });
       } else {
@@ -255,6 +248,7 @@ function SubscriptionContent() {
       });
     }
   }, [queryStatus, queryOrderId, queryNPId]);
+
 
   // Copy to clipboard helper
   function handleCopyText(text, key) {
@@ -444,11 +438,14 @@ function SubscriptionContent() {
 
           if (data.orderId) {
             try {
-              const statusRes = await fetch(`/api/payment/status/${data.orderId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
+              // Use /api/payment/sync: no auth required, directly queries NOWPayments
+              const syncRes = await fetch('/api/payment/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId: data.orderId })
               });
-              const statusData = await statusRes.json();
-              if (statusData.activated || statusData.order?.status === 'finished' || statusData.order?.status === 'confirmed') {
+              const syncData = await syncRes.json();
+              if (syncData.activated || syncData.alreadyProcessed) {
                 clearInterval(interval);
                 try {
                   localStorage.removeItem('crazii_last_payment_order_id');
@@ -457,9 +454,9 @@ function SubscriptionContent() {
                     const parsed = JSON.parse(stored);
                     parsed.subscriptionStatus = true;
                     parsed.subscription_status = true;
-                    if (statusData.subscriptionExpiry || statusData.order?.subscription_expiry) {
-                      parsed.subscriptionExpiry = statusData.subscriptionExpiry || statusData.order?.subscription_expiry;
-                      parsed.subscription_expiry = statusData.subscriptionExpiry || statusData.order?.subscription_expiry;
+                    if (syncData.subscriptionExpiry || syncData.order?.subscription_expiry) {
+                      parsed.subscriptionExpiry = syncData.subscriptionExpiry || syncData.order?.subscription_expiry;
+                      parsed.subscription_expiry = syncData.subscriptionExpiry || syncData.order?.subscription_expiry;
                     }
                     localStorage.setItem('crazii_user', JSON.stringify(parsed));
                   }
@@ -502,18 +499,20 @@ function SubscriptionContent() {
     }
   }
 
-  // Active status check & sync with NOWPayments
+  // Manual sync check — calls /api/payment/sync directly
   async function handleCheckPaymentStatus() {
-    if (!paymentInfo?.orderId) return;
-    const token = getSessionToken();
+    const orderId = paymentInfo?.orderId || (() => {
+      try { return localStorage.getItem('crazii_last_payment_order_id'); } catch { return null; }
+    })();
+    if (!orderId) return;
     setCheckingStatus(true);
     setMessage(null);
 
     try {
-      const res = await fetch(`/api/payment/status/${paymentInfo.orderId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+      const res = await fetch('/api/payment/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId })
       });
       const data = await res.json();
       if (data.success && (data.activated || data.order?.status === 'finished' || data.order?.status === 'confirmed')) {
