@@ -80,6 +80,9 @@ export default function TerminalPage() {
   const [notification, setNotification] = useState(null);
   const [ksiLabelText, setKsiLabelText] = useState('BOYS BUYING (KSI)');
   const [kcxLabelText, setKcxLabelText] = useState('BEARISHNESS (KCX)');
+  const [livePrices, setLivePrices] = useState({});
+  const livePricesRef = useRef({});
+  const priceThrottleTimerRef = useRef(null);
 
   // Load right sidebar state from localStorage on mount (defaults to false on mobile)
   useEffect(() => {
@@ -1038,7 +1041,24 @@ export default function TerminalPage() {
 
           if (!sym || priceVal === undefined) return;
           sym = String(sym).trim();
+          const cleanSym = sym.replace(/\.ca$/i, '').trim();
 
+          // A. Store live tick price in fast dictionary
+          livePricesRef.current[sym] = priceVal;
+          livePricesRef.current[cleanSym] = priceVal;
+          if (!sym.endsWith('.ca')) {
+            livePricesRef.current[`${sym}.ca`] = priceVal;
+          }
+
+          // Throttle UI re-render (batch updates every 250ms for 60fps responsiveness)
+          if (!priceThrottleTimerRef.current) {
+            priceThrottleTimerRef.current = setTimeout(() => {
+              setLivePrices({ ...livePricesRef.current });
+              priceThrottleTimerRef.current = null;
+            }, 250);
+          }
+
+          // B. Forward to active chart slot(s)
           const count = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
 
           for (let idx = 0; idx < count; idx++) {
@@ -1447,6 +1467,7 @@ export default function TerminalPage() {
           currentTimeframeCode={slots[activeSlotIndex]?.code || currentCode}
           onSelectAsset={handleSelectAsset}
           visibleSlotCount={visibleSlotCount}
+          livePrices={livePrices}
         />
       </div>
 
@@ -1461,6 +1482,7 @@ export default function TerminalPage() {
         targetSlotIndex={activeSlotIndex}
         activeLayout={activeLayout}
         onSelectAsset={handleSelectAsset}
+        livePrices={livePrices}
       />
 
       {/* Timezone Switcher Modal */}

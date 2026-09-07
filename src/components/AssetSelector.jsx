@@ -11,6 +11,7 @@ export default function AssetSelector({
   targetSlotIndex = 0,
   activeLayout = '1',
   onSelectAsset,
+  livePrices = {},
 }) {
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -182,16 +183,32 @@ export default function AssetSelector({
                 {/* Right: Price & Timeframe Badges */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ textAlign: 'right' }}>
-                    <div
-                      style={{
-                        fontFamily: 'JetBrains Mono',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: '#00E676',
-                      }}
-                    >
-                      {sym.price}
-                    </div>
+                    {(() => {
+                      const cleanSym = sym.code ? sym.code.replace(/\.ca$/i, '') : '';
+                      const live = livePrices[sym.code] || livePrices[cleanSym] || livePrices[`${sym.code}.ca`];
+                      let displayPrice = sym.price;
+                      let isLive = false;
+                      if (live !== undefined && live !== null) {
+                        const num = parseFloat(live);
+                        if (!isNaN(num)) {
+                          const dec = sym.decimals !== undefined ? sym.decimals : (num >= 1000 ? 2 : 4);
+                          displayPrice = num.toFixed(dec);
+                          isLive = true;
+                        }
+                      }
+                      return (
+                        <div
+                          style={{
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: isLive ? '#00E676' : 'var(--text-muted, #888)',
+                          }}
+                        >
+                          {displayPrice}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div style={{ display: 'flex', gap: 3 }}>

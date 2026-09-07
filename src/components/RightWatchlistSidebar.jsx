@@ -14,6 +14,7 @@ export default function RightWatchlistSidebar({
   currentTimeframeCode,
   onSelectAsset,
   visibleSlotCount = 1,
+  livePrices = {},
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
@@ -367,9 +368,33 @@ export default function RightWatchlistSidebar({
 
                   {/* Price & Timeframes Quick Pills */}
                   <div className="asset-action-col">
-                    {sym.price && (
-                      <span className="asset-price-text">{sym.price}</span>
-                    )}
+                    {(() => {
+                      const cleanSym = sym.code ? sym.code.replace(/\.ca$/i, '') : '';
+                      const live = livePrices[sym.code] || livePrices[cleanSym] || livePrices[`${sym.code}.ca`];
+                      let displayPrice = sym.price;
+                      let isLive = false;
+                      if (live !== undefined && live !== null) {
+                        const num = parseFloat(live);
+                        if (!isNaN(num)) {
+                          const dec = sym.decimals !== undefined ? sym.decimals : (num >= 1000 ? 2 : 4);
+                          displayPrice = num.toFixed(dec);
+                          isLive = true;
+                        }
+                      }
+                      if (!displayPrice) return null;
+                      return (
+                        <span
+                          className={`asset-price-text ${isLive ? 'live-tick' : ''}`}
+                          style={{
+                            color: isLive ? '#00E676' : 'inherit',
+                            fontWeight: isLive ? 700 : 500,
+                            fontFamily: 'JetBrains Mono, monospace'
+                          }}
+                        >
+                          {displayPrice}
+                        </span>
+                      );
+                    })()}
                     <div className="item-tf-pills">
                       {availableTfs.map((tf) => {
                         const isThisTfActive = isSelectedSymbol && tf.code === currentTimeframeCode;

@@ -115,10 +115,10 @@ export default function Header({
     if (email.startsWith('trial_') || (user?.name || '').toLowerCase().includes('dùng thử')) {
       planName = 'Gói Dùng Thử (Trial)';
     } else {
-      planName = 'Gói Pro Tiêu Chuẩn (1 Tháng)';
+      planName = 'Gói TRADEWH Pro (30 Ngày)';
     }
   } else if (isExpired) {
-    planName = 'Gói Pro (Đã hết hạn)';
+    planName = 'Gói TRADEWH Pro (Đã hết hạn)';
   }
 
   // Close dropdown on click outside
