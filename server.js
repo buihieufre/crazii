@@ -87,17 +87,15 @@ function isUserAdmin(user) {
 
 function isUserSubscriptionActive(user) {
   if (!user) return false;
-  // If explicitly cancelled or marked inactive
-  if (user.subscription_status === false || user.subscriptionStatus === false) {
-    return false;
-  }
   const expiry = user.subscriptionExpiry || user.subscription_expiry;
   if (expiry) {
     const expiryTime = new Date(expiry).getTime();
-    return !isNaN(expiryTime) && expiryTime > Date.now();
+    if (!isNaN(expiryTime)) {
+      return expiryTime > Date.now();
+    }
   }
   if (isUserAdmin(user)) return true;
-  return false;
+  return Boolean(user.subscriptionStatus || user.subscription_status);
 }
 
 // Active Sockets tracker for single-device kick-out (disabled when ALLOW_CONCURRENT_SESSIONS is true)
@@ -646,10 +644,18 @@ async function requireAuthAndDevice(req, res, next) {
     });
   }
 
+  const isSubActive = isUserSubscriptionActive(dbUser);
+  const subExp = dbUser.subscriptionExpiry || dbUser.subscription_expiry || null;
+
   req.user = {
     ...dbUser,
     sub: dbUser.id || dbUser.sub,
-    deviceId: sessionPayload.deviceId
+    deviceId: sessionPayload.deviceId,
+    subscriptionStatus: isSubActive,
+    subscription_status: isSubActive,
+    subscriptionExpiry: subExp ? (typeof subExp === 'string' ? subExp : new Date(subExp).toISOString()) : null,
+    subscription_expiry: subExp ? (typeof subExp === 'string' ? subExp : new Date(subExp).toISOString()) : null,
+    role: isUserAdmin(dbUser) ? 'admin' : (dbUser.role || 'user')
   };
   next();
 }
@@ -1857,32 +1863,33 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
 
       const userId = String(targetUser.id || targetUser.sub || '').trim();
 
-      // Update Prisma User
-      if (prisma && prisma.user) {
+      // Update Prisma User & Subscription Orders atomically via Transaction
+      if (prisma && prisma.$transaction) {
         try {
-          await prisma.user.update({
-            where: { id: userId },
-            data: {
-              subscription_status: false,
-              subscription_expiry: null
-            }
-          });
-        } catch (dbErr) {
-          console.warn(`[Subscription Cancel] Prisma update notice:`, dbErr.message);
-        }
+          await prisma.$transaction(async (tx) => {
+            await tx.user.update({
+              where: { id: userId },
+              data: {
+                subscription_status: false,
+                subscription_expiry: null
+              }
+            });
 
-        try {
-          await prisma.subscriptionOrder.updateMany({
-            where: {
-              OR: [
-                { user_id: userId },
-                { email: emailToCancel }
-              ],
-              status: { in: ['waiting', 'pending'] }
-            },
-            data: { status: 'cancelled' }
-          });
-        } catch (e) {}
+            await tx.subscriptionOrder.updateMany({
+              where: {
+                OR: [
+                  { user_id: userId },
+                  { email: emailToCancel }
+                ],
+                status: { in: ['waiting', 'pending'] }
+              },
+              data: { status: 'cancelled' }
+            });
+          }, { maxWait: 5000, timeout: 10000 });
+          console.log(`[Subscription Cancel Transaction] ⚡ Successfully revoked subscription & cancelled orders for ${emailToCancel}`);
+        } catch (dbErr) {
+          console.warn(`[Subscription Cancel Transaction] ⚠️ Notice during transaction:`, dbErr.message);
+        }
       }
 
       // Update Supabase users
@@ -2143,12 +2150,12 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   app.post('/api/payment/create', requireAuthAndDevice, handleCreatePaymentInvoice);
 
   /**
-   * Core Idempotent Payment Activation Processor
-   * Used by both Webhook and Active Polling to guarantee:
-   * 1. 100% Idempotency: Never re-activates an already-processed order
-   * 2. Never auto-renews when expired: Once order is marked 'finished', subsequent calls do nothing
-   * 3. Comprehensive user lookup: by order_id, existingOrder.user_id, or email
-   * 4. Updates User table and SubscriptionOrder table in Prisma & Supabase
+   * Core Idempotent & Atomic Payment Activation Processor
+   * Executed inside a Prisma Database Transaction (ACID) to guarantee:
+   * 1. 100% Atomicity: Order status & User subscription expiry are committed together or rolled back.
+   * 2. Concurrency / Double Credit Shield: Prevents simultaneous Webhook + Polling from double-extending days.
+   * 3. Idempotency: Finished / Confirmed orders exit immediately without touching expiry.
+   * 4. Multi-DataStore Sync: Non-blocking Supabase REST sync post-commit.
    */
   async function processSuccessfulPayment({
     orderId,
@@ -2162,18 +2169,201 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   }) {
     console.log(`[Payment Processor] ⚡ Processing payment notification from [${source}] for Order [${orderId || paymentId}] (Status: ${paymentStatus})...`);
 
-    // 1. Locate the Order in DB
-    let existingOrder = orderId ? await findSubscriptionOrder(orderId) : null;
-    if (!existingOrder && paymentId) {
-      existingOrder = await findSubscriptionOrderByPaymentId(String(paymentId));
+    // 1. Resolve Order ID
+    let resolvedOrderId = orderId;
+    if (!resolvedOrderId && paymentId) {
+      const existing = await findSubscriptionOrderByPaymentId(String(paymentId));
+      if (existing) resolvedOrderId = existing.order_id;
     }
 
-    const resolvedOrderId = orderId || existingOrder?.order_id;
+    const finalStatus = paymentStatus === 'sending' ? 'confirmed' : (paymentStatus || 'finished');
+    const paymentAmount = String(priceAmount || actuallyPaid || "15.00");
+    const currency = payCurrency || "USDT";
+    const cryptomusUuid = String(paymentId || '');
 
-    // 2. STRICT IDEMPOTENCY GUARD:
-    // If order was ALREADY finished or confirmed, EXIT IMMEDIATELY. DO NOT TOUCH USER EXPIRY!
+    // 2. Execute via Prisma Interactive Transaction (PostgreSQL ACID)
+    if (prisma && prisma.$transaction) {
+      try {
+        const txResult = await prisma.$transaction(async (tx) => {
+          // A. Locate Order inside transaction
+          let txOrder = resolvedOrderId ? await tx.subscriptionOrder.findUnique({
+            where: { order_id: resolvedOrderId }
+          }) : null;
+
+          if (!txOrder && paymentId) {
+            txOrder = await tx.subscriptionOrder.findFirst({
+              where: { cryptomus_uuid: String(paymentId) }
+            });
+            if (txOrder) resolvedOrderId = txOrder.order_id;
+          }
+
+          // B. STRICT IDEMPOTENCY GUARD:
+          // If order is ALREADY finished or confirmed, EXIT IMMEDIATELY.
+          if (txOrder && (txOrder.status === 'finished' || txOrder.status === 'confirmed')) {
+            return {
+              alreadyProcessed: true,
+              orderId: resolvedOrderId,
+              status: txOrder.status,
+              paid_at: txOrder.paid_at,
+              message: 'Order was already processed previously'
+            };
+          }
+
+          // C. ATOMIC STATUS CLAIM (Concurrency Lock):
+          // If order exists and is pending/waiting, update it atomically.
+          // If another concurrent request already marked it finished, updateMany returns count === 0!
+          if (txOrder) {
+            const claimResult = await tx.subscriptionOrder.updateMany({
+              where: {
+                order_id: resolvedOrderId,
+                OR: [
+                  { status: { in: ['pending', 'waiting'] } },
+                  { status: null }
+                ]
+              },
+              data: {
+                status: finalStatus,
+                amount: paymentAmount,
+                currency: currency,
+                cryptomus_uuid: cryptomusUuid || txOrder.cryptomus_uuid || null,
+                paid_at: new Date()
+              }
+            });
+
+            if (claimResult.count === 0) {
+              return {
+                alreadyProcessed: true,
+                orderId: resolvedOrderId,
+                message: 'Order already processed concurrently by another process'
+              };
+            }
+          }
+
+          // D. Identify Target User inside Transaction
+          let targetUserId = txOrder?.user_id || null;
+          let targetEmail = txOrder?.email || null;
+
+          if (!targetUserId && resolvedOrderId && resolvedOrderId.startsWith('SUB_')) {
+            const parts = resolvedOrderId.split('_');
+            const candidate = parts.slice(1, -1).join('_') || parts[1];
+            if (candidate && candidate.includes('@')) {
+              targetEmail = candidate;
+            } else if (candidate) {
+              targetUserId = candidate;
+            }
+          }
+
+          // Query user inside tx
+          let txUser = null;
+          if (targetUserId) {
+            txUser = await tx.user.findUnique({ where: { id: targetUserId } });
+          }
+          if (!txUser && targetEmail) {
+            txUser = await tx.user.findUnique({ where: { email: targetEmail.toLowerCase().trim() } });
+          }
+          if (!txUser && targetUserId) {
+            txUser = await tx.user.findFirst({ where: { email: targetUserId.toLowerCase().trim() } });
+          }
+
+          if (!txUser) {
+            throw new Error(`User not found for order [${resolvedOrderId}]. Transaction aborted to preserve atomicity.`);
+          }
+
+          // E. Calculate +30 Days Subscription Expiry
+          const currentExpiryTime = txUser.subscription_expiry ? new Date(txUser.subscription_expiry).getTime() : 0;
+          const nowTime = Date.now();
+          const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
+          const newExpiry = new Date(baseTime + (30 * 24 * 3600 * 1000));
+
+          // F. Atomic User Update inside Transaction
+          const updatedTxUser = await tx.user.update({
+            where: { id: txUser.id },
+            data: {
+              subscription_status: true,
+              subscription_expiry: newExpiry
+            }
+          });
+
+          // G. If order didn't exist in DB before (e.g. ad-hoc order), create it within transaction
+          if (!txOrder) {
+            await tx.subscriptionOrder.create({
+              data: {
+                order_id: resolvedOrderId || `SUB_${txUser.id}_${Date.now()}`,
+                user_id: txUser.id,
+                email: txUser.email,
+                status: finalStatus,
+                amount: paymentAmount,
+                currency: currency,
+                cryptomus_uuid: cryptomusUuid || null,
+                paid_at: new Date()
+              }
+            });
+          }
+
+          return {
+            success: true,
+            activated: true,
+            orderId: resolvedOrderId,
+            status: finalStatus,
+            newExpiry: newExpiry.toISOString(),
+            email: updatedTxUser.email,
+            userId: updatedTxUser.id
+          };
+        }, {
+          maxWait: 5000,
+          timeout: 10000
+        });
+
+        // 3. Post-Commit Hooks (Outside Transaction: Non-blocking Supabase sync)
+        if (txResult.alreadyProcessed) {
+          console.log(`[Prisma Transaction] ℹ️ Order [${txResult.orderId}] was already activated. Transaction safely concluded without changes.`);
+          return {
+            success: true,
+            alreadyProcessed: true,
+            orderId: txResult.orderId,
+            status: txResult.status,
+            message: 'Order was already processed previously'
+          };
+        }
+
+        console.log(`[Prisma Transaction] ⚡ Transaction COMMITTED successfully for order [${txResult.orderId}]! User: ${txResult.email} extended until ${txResult.newExpiry}`);
+
+        // Async non-blocking secondary Supabase sync
+        if (supabaseServer) {
+          Promise.allSettled([
+            supabaseServer.from('users').update({
+              subscription_status: true,
+              subscription_expiry: txResult.newExpiry
+            }).eq('id', txResult.userId),
+            supabaseServer.from('subscription_orders').upsert({
+              order_id: txResult.orderId,
+              user_id: txResult.userId,
+              email: txResult.email,
+              status: txResult.status,
+              amount: paymentAmount,
+              currency: currency,
+              cryptomus_uuid: cryptomusUuid || null,
+              paid_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'order_id' })
+          ]).catch(syncErr => console.warn('[Supabase Sync Notice]', syncErr.message));
+        }
+
+        return txResult;
+      } catch (txErr) {
+        console.error(`[Prisma Transaction] ❌ Transaction ROLLED BACK for order [${resolvedOrderId}]:`, txErr.message);
+        return {
+          success: false,
+          error: txErr.message,
+          message: 'Transaction failed and all changes were safely rolled back'
+        };
+      }
+    }
+
+    // Fallback: If Prisma is unavailable, proceed with standard sequential update
+    console.warn(`[Payment Processor] ⚠️ Prisma unavailable, running fallback processing for [${resolvedOrderId}]`);
+    let existingOrder = resolvedOrderId ? await findSubscriptionOrder(resolvedOrderId) : null;
     if (existingOrder && (existingOrder.status === 'finished' || existingOrder.status === 'confirmed')) {
-      console.log(`[Payment Processor] ℹ️ Order [${resolvedOrderId}] was ALREADY activated on ${existingOrder.paid_at || existingOrder.updated_at}. Skipping duplicate processing.`);
       return {
         success: true,
         alreadyProcessed: true,
@@ -2183,34 +2373,11 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       };
     }
 
-    // 3. Locate Target User
-    let userId = null;
-    if (resolvedOrderId && resolvedOrderId.startsWith('SUB_')) {
-      const parts = resolvedOrderId.split('_');
-      userId = parts.slice(1, -1).join('_') || parts[1];
-    }
-
-    let targetUser = (userId ? await findUserById(userId) : null) || (userId ? await findUserByEmail(userId) : null);
-    if (!targetUser && existingOrder?.user_id) {
-      targetUser = (await findUserById(existingOrder.user_id)) || (await findUserByEmail(existingOrder.email));
-    }
-    if (!targetUser && existingOrder?.email) {
-      targetUser = await findUserByEmail(existingOrder.email);
-    }
-
+    let targetUser = (await findUserById(existingOrder?.user_id)) || (await findUserByEmail(existingOrder?.email));
     if (!targetUser) {
-      console.warn(`[Payment Processor] ⚠️ Could not identify user for order [${resolvedOrderId}]. Updating order status only.`);
-      if (existingOrder) {
-        await saveSubscriptionOrder({
-          ...existingOrder,
-          status: paymentStatus === 'sending' ? 'confirmed' : paymentStatus,
-          paid_at: new Date().toISOString()
-        });
-      }
       return { success: false, message: 'User not found for order', orderId: resolvedOrderId };
     }
 
-    // 4. Calculate +30 Days Subscription Expiry
     const currentExpiryTime = targetUser.subscriptionExpiry ? new Date(targetUser.subscriptionExpiry).getTime() : 0;
     const nowTime = Date.now();
     const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
@@ -2218,30 +2385,22 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
 
     const updatedUser = {
       ...targetUser,
+      subscription_status: true,
       subscriptionStatus: true,
+      subscription_expiry: newExpiry,
       subscriptionExpiry: newExpiry
     };
 
-    // 5. Persist to Database (Prisma + Supabase)
     await saveUserToDb(updatedUser);
-    await recordUserLoginToSupabase(updatedUser, req);
-
-    // 6. Update Subscription Order to 'finished' or 'confirmed'
-    const finalStatus = paymentStatus === 'sending' ? 'confirmed' : (paymentStatus || 'finished');
-    const updatedOrder = {
-      order_id: resolvedOrderId || `SUB_${targetUser.id}_${Date.now()}`,
-      user_id: targetUser.id || targetUser.sub,
+    await saveSubscriptionOrder({
+      order_id: resolvedOrderId,
+      user_id: targetUser.id,
       email: targetUser.email,
       status: finalStatus,
-      amount: String(priceAmount || actuallyPaid || existingOrder?.amount || "15.00"),
-      currency: payCurrency || existingOrder?.currency || "USDT",
-      payment_url: existingOrder?.payment_url || null,
-      cryptomus_uuid: String(paymentId || existingOrder?.cryptomus_uuid || ''),
+      amount: paymentAmount,
+      currency: currency,
       paid_at: new Date().toISOString()
-    };
-    await saveSubscriptionOrder(updatedOrder);
-
-    console.log(`[Payment Processor] 🎉 Subscription ACTIVATED for ${targetUser.email} until ${newExpiry} via [${source}] (Order: ${resolvedOrderId})`);
+    });
 
     return {
       success: true,
@@ -2423,43 +2582,27 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       return res.status(400).json({ success: false, message: 'Vui lòng cung cấp orderId.' });
     }
 
-    let userId = user.id || user.sub;
-    if (orderId.startsWith('SUB_')) {
-      const parts = orderId.split('_');
-      userId = parts.slice(1, -1).join('_') || parts[1] || userId;
+    const result = await processSuccessfulPayment({
+      orderId,
+      paymentStatus: 'finished',
+      priceAmount: "15.00",
+      payCurrency: "USDT",
+      source: 'Admin / Dev Simulation',
+      req
+    });
+
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: result.alreadyProcessed
+          ? `Đơn hàng ${orderId} đã được kích hoạt trước đó.`
+          : `Đã mô phỏng thanh toán thành công cho đơn hàng ${orderId}! Gói cước đã được kích hoạt +30 ngày qua Transaction.`,
+        expiry: result.newExpiry,
+        alreadyProcessed: Boolean(result.alreadyProcessed)
+      });
     }
 
-    let targetUser = (await findUserById(userId)) || (await findUserByEmail(userId)) || user;
-    const currentExpiryTime = targetUser.subscriptionExpiry ? new Date(targetUser.subscriptionExpiry).getTime() : 0;
-    const nowTime = Date.now();
-    const baseTime = currentExpiryTime > nowTime ? currentExpiryTime : nowTime;
-    const newExpiry = new Date(baseTime + (30 * 24 * 3600 * 1000)).toISOString();
-
-    const updated = {
-      ...targetUser,
-      subscriptionStatus: true,
-      subscriptionExpiry: newExpiry
-    };
-
-    await recordUserLoginToSupabase(updated, req);
-
-    await saveSubscriptionOrder({
-      order_id: orderId,
-      user_id: targetUser.id || targetUser.sub,
-      email: targetUser.email,
-      status: 'finished',
-      amount: "15.00",
-      currency: "USD",
-      paid_at: new Date().toISOString()
-    });
-
-    console.log(`[Payment Simulation] ⚡ Order ${orderId} SIMULATED & CONFIRMED for ${targetUser.email}`);
-
-    return res.json({
-      success: true,
-      message: `Đã mô phỏng thanh toán thành công cho đơn hàng ${orderId}! Gói cước đã được kích hoạt +30 ngày.`,
-      expiry: newExpiry
-    });
+    return res.status(400).json(result);
   });
 
   // POST /api/admin/grant-trial (Admin 3-Day Trial Feature)

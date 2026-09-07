@@ -1197,14 +1197,14 @@ const ChartContainer = forwardRef(function ChartContainer(
         const ksiGreen = parseFloat(item.ksi_green);
         const ksiRed = parseFloat(item.ksi_red);
         let ksiVal = 0;
-        let ksiColor = 'rgba(0, 230, 118, 0.9)';
+        let ksiColor = '#008001';
 
         if (!isNaN(ksiGreen) && ksiGreen > 0) {
           ksiVal = ksiGreen;
-          ksiColor = '#00E676';
+          ksiColor = '#008001';
         } else if (!isNaN(ksiRed) && ksiRed > 0) {
           ksiVal = ksiRed;
-          ksiColor = '#FF3B30';
+          ksiColor = '#fe0000';
         }
 
         ksiData.push({
@@ -1228,7 +1228,7 @@ const ChartContainer = forwardRef(function ChartContainer(
         kcxData.push({
           time: time,
           value: isNaN(kcxVal) ? 0 : kcxVal,
-          color: '#00BFFF',
+          color: '#1e90ff',
         });
       }
 
@@ -1485,14 +1485,14 @@ const ChartContainer = forwardRef(function ChartContainer(
           const ksiGreen = parseFloat(parts[44]);
           const ksiRed = parseFloat(parts[45]);
           let ksiVal = 0;
-          let ksiColor = 'rgba(0, 230, 118, 0.9)';
+          let ksiColor = '#008001';
 
           if (!isNaN(ksiGreen) && ksiGreen > 0) {
             ksiVal = ksiGreen;
-            ksiColor = '#00E676';
+            ksiColor = '#008001';
           } else if (!isNaN(ksiRed) && ksiRed > 0) {
             ksiVal = ksiRed;
-            ksiColor = '#FF3B30';
+            ksiColor = '#fe0000';
           }
           if (ksiSeriesRef.current) {
             try {
@@ -1503,7 +1503,7 @@ const ChartContainer = forwardRef(function ChartContainer(
           const kcxVal = parseFloat(parts[40]);
           if (kcxSeriesRef.current) {
             try {
-              kcxSeriesRef.current.update({ time, value: isNaN(kcxVal) ? 0 : kcxVal, color: '#00BFFF' });
+              kcxSeriesRef.current.update({ time, value: isNaN(kcxVal) ? 0 : kcxVal, color: '#1e90ff' });
             } catch (e) {}
           }
 
@@ -1615,7 +1615,11 @@ const ChartContainer = forwardRef(function ChartContainer(
       let existingLine = activePriceLinesMapRef.current.get(spec.key);
       if (existingLine) {
         try {
-          existingLine.applyOptions({ price: price });
+          existingLine.applyOptions({
+            price: price,
+            color: spec.color,
+            lineStyle: spec.lineStyle !== undefined ? spec.lineStyle : 0,
+          });
         } catch (e) {
           existingLine = null;
         }
@@ -1776,6 +1780,7 @@ const ChartContainer = forwardRef(function ChartContainer(
 
     // 2. KSI Histogram Series (Pane 1 - Resizable Sub-Pane with Solid Opaque Background)
     const ksiOpts = {
+      color: '#008001',
       priceFormat: {
         type: 'custom',
         formatter: (price) => Number(price).toFixed(2),
@@ -1787,6 +1792,7 @@ const ChartContainer = forwardRef(function ChartContainer(
 
     // 3. KCX Histogram Series (Pane 2 - Resizable Sub-Pane with Solid Opaque Background)
     const kcxOpts = {
+      color: '#1e90ff',
       priceFormat: {
         type: 'custom',
         formatter: (price) => Number(price).toFixed(2),

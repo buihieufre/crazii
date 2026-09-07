@@ -182,11 +182,29 @@ function SubscriptionContent() {
           .then(res => res.json())
           .then(data => {
             if (data.success && (data.activated || data.order?.status === 'finished' || data.order?.status === 'confirmed')) {
+              try {
+                const stored = localStorage.getItem('crazii_user');
+                if (stored) {
+                  const parsed = JSON.parse(stored);
+                  parsed.subscriptionStatus = true;
+                  parsed.subscription_status = true;
+                  if (data.subscriptionExpiry || data.order?.subscription_expiry) {
+                    parsed.subscriptionExpiry = data.subscriptionExpiry || data.order?.subscription_expiry;
+                    parsed.subscription_expiry = data.subscriptionExpiry || data.order?.subscription_expiry;
+                  }
+                  localStorage.setItem('crazii_user', JSON.stringify(parsed));
+                }
+              } catch (e) {}
+
               setMessage({
                 type: 'success',
-                text: '🎉 Giao dịch thành công! Gói thành viên Pro đã được kích hoạt (+30 ngày).'
+                text: '🎉 Giao dịch thành công! Gói thành viên Pro đã được kích hoạt (+30 ngày). Đang chuyển hướng sang biểu đồ...'
               });
               fetchSubscriptionData();
+
+              setTimeout(() => {
+                router.push('/');
+              }, 1800);
             } else {
               setMessage({
                 type: 'info',
@@ -398,11 +416,29 @@ function SubscriptionContent() {
               const statusData = await statusRes.json();
               if (statusData.activated || statusData.order?.status === 'finished' || statusData.order?.status === 'confirmed') {
                 clearInterval(interval);
+                try {
+                  const stored = localStorage.getItem('crazii_user');
+                  if (stored) {
+                    const parsed = JSON.parse(stored);
+                    parsed.subscriptionStatus = true;
+                    parsed.subscription_status = true;
+                    if (statusData.subscriptionExpiry || statusData.order?.subscription_expiry) {
+                      parsed.subscriptionExpiry = statusData.subscriptionExpiry || statusData.order?.subscription_expiry;
+                      parsed.subscription_expiry = statusData.subscriptionExpiry || statusData.order?.subscription_expiry;
+                    }
+                    localStorage.setItem('crazii_user', JSON.stringify(parsed));
+                  }
+                } catch (e) {}
+
                 setMessage({
                   type: 'success',
-                  text: '🎉 Thanh toán thành công! Gói thành viên TRADEWH Pro đã được kích hoạt (+30 ngày).'
+                  text: '🎉 Thanh toán thành công! Gói thành viên TRADEWH Pro đã được kích hoạt (+30 ngày). Đang chuyển hướng sang biểu đồ...'
                 });
                 await fetchSubscriptionData();
+
+                setTimeout(() => {
+                  router.push('/');
+                }, 1800);
                 return;
               }
             } catch (e) {}
@@ -441,11 +477,29 @@ function SubscriptionContent() {
       });
       const data = await res.json();
       if (data.success && (data.activated || data.order?.status === 'finished' || data.order?.status === 'confirmed')) {
+        try {
+          const stored = localStorage.getItem('crazii_user');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            parsed.subscriptionStatus = true;
+            parsed.subscription_status = true;
+            if (data.subscriptionExpiry || data.order?.subscription_expiry) {
+              parsed.subscriptionExpiry = data.subscriptionExpiry || data.order?.subscription_expiry;
+              parsed.subscription_expiry = data.subscriptionExpiry || data.order?.subscription_expiry;
+            }
+            localStorage.setItem('crazii_user', JSON.stringify(parsed));
+          }
+        } catch (e) {}
+
         setMessage({
           type: 'success',
-          text: `🎉 Xác nhận thanh toán thành công! Gói Pro đã kích hoạt +30 ngày.`
+          text: `🎉 Xác nhận thanh toán thành công! Gói Pro đã kích hoạt +30 ngày. Đang chuyển hướng sang biểu đồ...`
         });
         await fetchSubscriptionData();
+
+        setTimeout(() => {
+          router.push('/');
+        }, 1800);
       } else {
         setMessage({
           type: 'info',
@@ -479,11 +533,29 @@ function SubscriptionContent() {
 
       const data = await res.json();
       if (data.success) {
+        try {
+          const stored = localStorage.getItem('crazii_user');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            parsed.subscriptionStatus = true;
+            parsed.subscription_status = true;
+            if (data.subscriptionExpiry) {
+              parsed.subscriptionExpiry = data.subscriptionExpiry;
+              parsed.subscription_expiry = data.subscriptionExpiry;
+            }
+            localStorage.setItem('crazii_user', JSON.stringify(parsed));
+          }
+        } catch (e) {}
+
         setMessage({
           type: 'success',
-          text: `⚡ Đã mô phỏng thanh toán thành công! Gói Pro đã được gia hạn +30 ngày.`
+          text: `⚡ Đã mô phỏng thanh toán thành công! Gói Pro đã được gia hạn +30 ngày. Đang chuyển hướng sang biểu đồ...`
         });
         await fetchSubscriptionData();
+
+        setTimeout(() => {
+          router.push('/');
+        }, 1800);
       } else {
         setMessage({ type: 'error', text: data.message || 'Lỗi mô phỏng thanh toán.' });
       }
@@ -494,16 +566,21 @@ function SubscriptionContent() {
     }
   }
 
-  const isActive = subData?.subscriptionStatus;
+  const isActive = Boolean(
+    subData?.subscriptionStatus ||
+    subData?.isAdmin ||
+    (subData?.subscriptionExpiry && new Date(subData.subscriptionExpiry).getTime() > Date.now())
+  );
   const daysLeft = subData?.daysLeft || 0;
   const isAdmin = subData?.isAdmin;
   const expiryDateFormatted = subData?.subscriptionExpiry
-    ? new Date(subData.subscriptionExpiry).toLocaleDateString('vi-VN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
+    ? new Date(subData.subscriptionExpiry).toLocaleString('vi-VN', {
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
       })
     : null;
 
@@ -548,7 +625,7 @@ function SubscriptionContent() {
         borderBottom: '1px solid #1A202C',
         zIndex: 1
       }}>
-        <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <Link href={isActive ? "/" : "/subscription"} style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{
             background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
             color: '#0B0E14',
@@ -561,7 +638,7 @@ function SubscriptionContent() {
             TRADEWH
           </div>
           <span style={{ fontSize: '12px', color: '#6B7C98', fontWeight: '600', letterSpacing: '1px' }}>
-            TERMINAL // BILLING
+            THANH TOÁN
           </span>
         </Link>
 
@@ -586,26 +663,28 @@ function SubscriptionContent() {
             </div>
           )}
 
-          {/* Return To Terminal */}
-          <Link
-            href="/"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '7px 14px',
-              background: '#121620',
-              color: '#E9E6E7',
-              border: '1px solid #222938',
-              borderRadius: '2px',
-              fontSize: '12px',
-              fontWeight: '600',
-              textDecoration: 'none'
-            }}
-          >
-            <span>📊</span>
-            <span>Terminal</span>
-          </Link>
+          {/* Return To Terminal - Chỉ xuất hiện khi đã thanh toán thành công */}
+          {isActive && (
+            <Link
+              href="/"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 14px',
+                background: '#121620',
+                color: '#E9E6E7',
+                border: '1px solid #222938',
+                borderRadius: '2px',
+                fontSize: '12px',
+                fontWeight: '600',
+                textDecoration: 'none'
+              }}
+            >
+              <span>📊</span>
+              <span>Terminal</span>
+            </Link>
+          )}
 
           {/* Logout Button */}
           <button
@@ -660,78 +739,201 @@ function SubscriptionContent() {
           </div>
         )}
 
-        {/* User Current Membership Status Banner */}
-        {subData && (
+        {/* ========================================================================= */}
+        {/* VIEW: ACTIVE MEMBERSHIP DASHBOARD (WHEN SUBSCRIPTION IS CONFIRMED/ACTIVE) */}
+        {/* ========================================================================= */}
+        {isActive ? (
           <div style={{
             width: '100%',
             maxWidth: '820px',
-            background: '#121620',
-            border: '1px solid #222938',
-            borderRadius: '2px',
-            padding: '18px 24px',
-            marginBottom: '28px',
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '16px'
+            background: 'linear-gradient(180deg, #131A24 0%, #0D1117 100%)',
+            border: '1px solid #283548',
+            borderRadius: '4px',
+            padding: '40px 32px',
+            marginBottom: '36px',
+            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.6)',
+            position: 'relative',
+            overflow: 'hidden'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-              <div style={{
-                width: '40px',
-                height: '40px',
-                background: isActive ? 'rgba(203, 177, 147, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                border: `1px solid ${isActive ? '#CBB193' : '#EF4444'}`,
-                borderRadius: '2px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '18px'
-              }}>
-                {isAdmin ? '👑' : isActive ? '💎' : '⚠️'}
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                  Tài Khoản: <strong style={{ color: '#E9E6E7' }}>{subData.email}</strong>
-                </div>
-                <div style={{ fontSize: '15px', fontWeight: '700', color: '#E9E6E7', marginTop: '2px' }}>
-                  {isAdmin
-                    ? 'QUẢN TRỊ VIÊN HỆ THỐNG (ADMIN ACCESS)'
-                    : isActive
-                    ? `GÓI PRO ĐANG HOẠT ĐỘNG // CÒN ${daysLeft} NGÀY`
-                    : 'CHƯA KÍCH HOẠT GÓI HOẶC ĐÃ HẾT HẠN'}
-                </div>
-                {expiryDateFormatted && !isAdmin && (
-                  <div style={{ fontSize: '12px', color: '#A0AEC0', marginTop: '2px' }}>
-                    Hạn sử dụng đến: <span style={{ color: '#00E5FF', fontWeight: '600' }}>{expiryDateFormatted}</span>
-                  </div>
-                )}
-              </div>
-            </div>
+            {/* Top Glow Accent Bar */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '3px',
+              background: 'linear-gradient(90deg, #22C55E 0%, #00E5FF 50%, #CBB193 100%)'
+            }} />
 
-            <div>
-              {isActive ? (
-                <Link
-                  href="/"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '9px 18px',
-                    background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
-                    color: '#0B0E14',
-                    border: 'none',
-                    borderRadius: '2px',
-                    fontSize: '12px',
-                    fontWeight: '800',
-                    letterSpacing: '0.5px',
-                    textDecoration: 'none',
-                    boxShadow: '0 2px 10px rgba(203, 177, 147, 0.2)'
-                  }}
-                >
-                  <span>MỞ BIỂU ĐỒ ↗</span>
-                </Link>
-              ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              
+              {/* Status Badge */}
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 16px',
+                background: 'rgba(34, 197, 94, 0.12)',
+                border: '1px solid rgba(34, 197, 94, 0.4)',
+                borderRadius: '20px',
+                marginBottom: '16px'
+              }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22C55E', boxShadow: '0 0 8px #22C55E' }} />
+                <span style={{ fontSize: '12px', fontWeight: '800', color: '#4ADE80', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                  GÓI ĐĂNG KÝ ĐANG HOẠT ĐỘNG (ACTIVE)
+                </span>
+              </div>
+
+              {/* Title & Plan Name */}
+              <h2 style={{ fontSize: '26px', fontWeight: '900', color: '#FFFFFF', margin: '0 0 8px 0', letterSpacing: '0.5px' }}>
+                {isAdmin ? '👑 GÓI QUẢN TRỊ VIÊN HỆ THỐNG' : '💎 GÓI PRO TIÊU CHUẨN (1 THÁNG)'}
+              </h2>
+              <p style={{ fontSize: '14px', color: '#8899A6', margin: '0 0 28px 0', maxWidth: '560px', lineHeight: '1.6' }}>
+                Tài khoản <strong style={{ color: '#E9E6E7' }}>{subData?.email || user?.email}</strong> đã được kích hoạt thành công. Đầy đủ quyền hạn phân tích thị trường cao cấp.
+              </p>
+
+              {/* Details Metrics Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '14px',
+                width: '100%',
+                marginBottom: '28px'
+              }}>
+                {/* Metric 1: Hạn dùng */}
+                <div style={{
+                  background: '#0B0E14',
+                  border: '1px solid #1E2638',
+                  borderRadius: '4px',
+                  padding: '16px 20px',
+                  textAlign: 'left'
+                }}>
+                  <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                    📅 Ngày Hết Hạn
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#00E5FF' }}>
+                    {expiryDateFormatted || (isAdmin ? 'Vô Thời Hạn (Admin)' : 'Đang cập nhật')}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#8899A6', marginTop: '2px' }}>
+                    Múi giờ hệ thống (Việt Nam UTC+7)
+                  </div>
+                </div>
+
+                {/* Metric 2: Thời gian còn lại */}
+                <div style={{
+                  background: '#0B0E14',
+                  border: '1px solid #1E2638',
+                  borderRadius: '4px',
+                  padding: '16px 20px',
+                  textAlign: 'left'
+                }}>
+                  <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                    ⏳ Thời Gian Còn Lại
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#4ADE80' }}>
+                    {isAdmin ? 'Toàn quyền vĩnh viễn' : `Còn ${daysLeft} Ngày`}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#8899A6', marginTop: '2px' }}>
+                    Trạng thái kết nối sẵn sàng 24/7
+                  </div>
+                </div>
+
+                {/* Metric 3: Quyền hạn kích hoạt */}
+                <div style={{
+                  background: '#0B0E14',
+                  border: '1px solid #1E2638',
+                  borderRadius: '4px',
+                  padding: '16px 20px',
+                  textAlign: 'left'
+                }}>
+                  <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                    ⚡ Quyền Hạn
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#CBB193' }}>
+                    Full Pro Features
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#8899A6', marginTop: '2px' }}>
+                    4 Biểu đồ + WebSocket Sub-second
+                  </div>
+                </div>
+              </div>
+
+              {/* Action: Big Button to Chart */}
+              <Link
+                href="/"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  width: '100%',
+                  maxWidth: '380px',
+                  padding: '16px 28px',
+                  background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
+                  color: '#0B0E14',
+                  borderRadius: '3px',
+                  fontSize: '15px',
+                  fontWeight: '900',
+                  letterSpacing: '1px',
+                  textDecoration: 'none',
+                  boxShadow: '0 4px 24px rgba(203, 177, 147, 0.3)',
+                  transition: 'transform 0.15s ease'
+                }}
+              >
+                <span>🚀</span>
+                <span>MỞ BIỂU ĐỒ TERMINAL (CHART) ↗</span>
+              </Link>
+
+              <p style={{ fontSize: '12px', color: '#6B7C98', marginTop: '16px', marginBottom: 0 }}>
+                💡 Gói cước của bạn đã được xác nhận. Các gói cước mua mới tự động ẩn để tránh nhầm lẫn.
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* User Current Membership Status Banner (Inactive Notice) */
+          subData && (
+            <div style={{
+              width: '100%',
+              maxWidth: '820px',
+              background: '#121620',
+              border: '1px solid #222938',
+              borderRadius: '2px',
+              padding: '18px 24px',
+              marginBottom: '28px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '16px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid #EF4444',
+                  borderRadius: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '18px'
+                }}>
+                  ⚠️
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    Tài Khoản: <strong style={{ color: '#E9E6E7' }}>{subData.email}</strong>
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: '700', color: '#EF4444', marginTop: '2px' }}>
+                    CHƯA KÍCH HOẠT GÓI HOẶC ĐÃ HẾT HẠN
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#A0AEC0', marginTop: '2px' }}>
+                    Vui lòng chọn gói cước bên dưới để kích hoạt quyền truy cập biểu đồ phân tích.
+                  </div>
+                </div>
+              </div>
+
+              <div>
                 <span style={{
                   padding: '6px 12px',
                   background: 'rgba(239, 68, 68, 0.1)',
@@ -743,15 +945,16 @@ function SubscriptionContent() {
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px'
                 }}>
-                  Inactive
+                  CHƯA KÍCH HOẠT
                 </span>
-              )}
+              </div>
             </div>
-          </div>
+          )
         )}
 
-        {/* SECTION: PRICING & PAYMENT CHECKOUT (NOWPAYMENTS DIRECT USDT) */}
-        <div style={{ width: '100%', maxWidth: '820px', marginBottom: '40px' }}>
+        {/* SECTION: PRICING & PAYMENT CHECKOUT (NOWPAYMENTS DIRECT USDT) - ONLY SHOWN WHEN INACTIVE */}
+        {!isActive && (
+          <div style={{ width: '100%', maxWidth: '820px', marginBottom: '40px' }}>
           
           <div style={{
             background: 'linear-gradient(180deg, #131722 0%, #0D1018 100%)',
@@ -774,7 +977,7 @@ function SubscriptionContent() {
                   borderRadius: '2px',
                   letterSpacing: '1px'
                 }}>
-                  TIER: PRO TERMINAL
+                  GÓI: PRO TERMINAL
                 </span>
                 <span style={{
                   fontSize: '11px',
@@ -786,7 +989,7 @@ function SubscriptionContent() {
                   borderRadius: '2px',
                   letterSpacing: '1px'
                 }}>
-                  MANUAL RENEWAL (30 NGÀY)
+                  GIA HẠN THỦ CÔNG (30 NGÀY)
                 </span>
               </div>
 
@@ -821,7 +1024,7 @@ function SubscriptionContent() {
                       🧪 Gói Test Thử Nghiệm
                     </strong>
                     <span style={{ fontSize: '10px', color: '#4ADE80', fontWeight: '700', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 6px', borderRadius: '2px' }}>
-                      TEST MODE
+                      BẢN THỬ NGHIỆM
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
@@ -852,7 +1055,7 @@ function SubscriptionContent() {
                       💎 Gói Pro Chuẩn
                     </strong>
                     <span style={{ fontSize: '10px', color: '#CBB193', fontWeight: '700', background: 'rgba(203, 177, 147, 0.15)', padding: '2px 6px', borderRadius: '2px' }}>
-                      OFFICIAL
+                      GÓI CHÍNH THỨC
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
@@ -1199,11 +1402,12 @@ function SubscriptionContent() {
               <span>•</span>
               <span>⚡ Mạng {selectedNetwork === 'eth' ? 'Ethereum (ERC-20)' : 'BNB Smart Chain (BEP-20)'}</span>
               <span>•</span>
-              <span>💬 Hỗ trợ Telegram: <a href="https://t.me/dhieu9b" target="_blank" rel="noopener noreferrer" style={{ color: '#00E5FF', textDecoration: 'none' }}>@dhieu9b</a></span>
+              <span>💬 Hỗ trợ Telegram: <a href="https://t.me/tradewh04" target="_blank" rel="noopener noreferrer" style={{ color: '#00E5FF', textDecoration: 'none' }}>@tradewh04</a></span>
             </div>
 
           </div>
         </div>
+        )}
 
         {/* ========================================================================= */}
         {/* VIEW: ADMIN MANAGEMENT CENTER                                             */}
@@ -1867,7 +2071,7 @@ export default function SubscriptionPage() {
   return (
     <Suspense fallback={
       <div style={{ minHeight: '100vh', background: '#0B0E14', color: '#CBB193', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace' }}>
-        LOADING TRADEWH SUBSCRIPTION TERMINAL...
+        ĐANG TẢI DỮ LIỆU THANH TOÁN TRADEWH...
       </div>
     }>
       <SubscriptionContent />

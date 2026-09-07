@@ -53,9 +53,11 @@ export default function Header({
 }) {
   const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false);
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const layoutDropdownRef = useRef(null);
   const saveDropdownRef = useRef(null);
+  const userDropdownRef = useRef(null);
 
   const isAdmin = Boolean(
     user && (
@@ -63,6 +65,48 @@ export default function Header({
       user.role === 'admin'
     )
   );
+
+  const isSubscribed = Boolean(
+    isAdmin || (
+      user && (
+        user.subscriptionStatus === true ||
+        user.subscription_status === true ||
+        (user.subscriptionExpiry && new Date(user.subscriptionExpiry).getTime() > Date.now()) ||
+        (user.subscription_expiry && new Date(user.subscription_expiry).getTime() > Date.now())
+      )
+    )
+  );
+
+  const expiryRaw = user?.subscriptionExpiry || user?.subscription_expiry;
+  let expiryFormatted = null;
+  let daysLeft = 0;
+  if (expiryRaw) {
+    const expTime = new Date(expiryRaw).getTime();
+    if (!isNaN(expTime)) {
+      const diff = expTime - Date.now();
+      daysLeft = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+      expiryFormatted = new Date(expiryRaw).toLocaleString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+    }
+  }
+
+  let planName = 'Chưa kích hoạt';
+  if (isAdmin) {
+    planName = 'Quản Trị Viên (Admin Access)';
+  } else if (isSubscribed) {
+    const email = (user?.email || '').toLowerCase();
+    if (email.startsWith('trial_') || (user?.name || '').toLowerCase().includes('dùng thử')) {
+      planName = 'Gói Dùng Thử (Trial)';
+    } else {
+      planName = 'Gói Pro Tiêu Chuẩn (1 Tháng)';
+    }
+  }
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -73,14 +117,17 @@ export default function Header({
       if (saveDropdownRef.current && !saveDropdownRef.current.contains(e.target)) {
         setIsSaveMenuOpen(false);
       }
+      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target)) {
+        setIsUserMenuOpen(false);
+      }
     }
-    if (isLayoutMenuOpen || isSaveMenuOpen) {
+    if (isLayoutMenuOpen || isSaveMenuOpen || isUserMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isLayoutMenuOpen, isSaveMenuOpen]);
+  }, [isLayoutMenuOpen, isSaveMenuOpen, isUserMenuOpen]);
 
   const accessLeft = tokenInfo?.accessToken?.timeLeftSeconds || 0;
   const refreshLeft = tokenInfo?.refreshToken?.timeLeftSeconds || 0;
@@ -125,7 +172,7 @@ export default function Header({
 
   return (
     <>
-      <header className="main-tv-header">
+      <header className="main-tv-header" style={{ position: 'relative', zIndex: 99999 }}>
         {/* Brand & Symbol & Timeframe Selection (Visible on Desktop & Mobile) */}
         <div className="brand-section">
           <div className="brand-logo">TRADEWH<span>.COM</span></div>
@@ -166,16 +213,6 @@ export default function Header({
             </div>
           )}
 
-          {/* Desktop Status Badges (Hidden on Mobile) */}
-          <div className={`desktop-only-item ${wsBadgeClass}`}>
-            <span className="live-dot" style={{ width: 5, height: 5 }}></span>
-            <span>{wsText}</span>
-          </div>
-
-          <div className={`desktop-only-item ${tokenPillClass}`} onClick={onOpenTokenModal} title={tokenTitle}>
-            <span className="live-dot" style={{ width: 5, height: 5 }}></span>
-            <span>{tokenLabel}</span>
-          </div>
         </div>
 
         {/* Desktop Controls (Hidden on Mobile) */}
@@ -340,26 +377,50 @@ export default function Header({
             )}
           </div>
 
-          {/* Subscription / Membership / Admin Button */}
-          <Link
-            href="/subscription"
-            className="btn subscription-btn-highlight"
-            style={{
-              textDecoration: 'none',
-              background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
-              borderColor: 'rgba(203, 177, 147, 0.45)',
-              color: '#CBB193',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              fontWeight: '700',
-              boxShadow: '0 1px 6px rgba(203, 177, 147, 0.15)'
-            }}
-            title={isAdmin ? "Quản Trị Viên: Tạo TK Dùng Thử & Quản Lý" : "Đăng Ký & Quản Lý Gói Pro"}
-          >
-            <span>{isAdmin ? '👑' : '💎'}</span>
-            <span>{isAdmin ? 'Quản Trị' : 'Gói Đăng Ký'}</span>
-          </Link>
+          {/* Subscription / Membership Button (Hidden automatically if user already subscribed and not admin) */}
+          {(!isSubscribed && !isAdmin) && (
+            <Link
+              href="/subscription"
+              className="btn subscription-btn-highlight"
+              style={{
+                textDecoration: 'none',
+                background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
+                borderColor: 'rgba(203, 177, 147, 0.45)',
+                color: '#CBB193',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: '700',
+                boxShadow: '0 1px 6px rgba(203, 177, 147, 0.15)'
+              }}
+              title="Đăng Ký Gói Pro $15/Tháng"
+            >
+              <span>💎</span>
+              <span>Gói Đăng Ký</span>
+            </Link>
+          )}
+
+          {isAdmin && (
+            <Link
+              href="/subscription"
+              className="btn subscription-btn-highlight"
+              style={{
+                textDecoration: 'none',
+                background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
+                borderColor: 'rgba(203, 177, 147, 0.45)',
+                color: '#CBB193',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: '700',
+                boxShadow: '0 1px 6px rgba(203, 177, 147, 0.15)'
+              }}
+              title="Quản Trị Viên: Tạo TK Dùng Thử & Quản Lý"
+            >
+              <span>👑</span>
+              <span>Quản Trị</span>
+            </Link>
+          )}
 
           {/* Fullscreen Toggle Button */}
           <button
@@ -371,50 +432,233 @@ export default function Header({
             <span>{isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}</span>
           </button>
 
-          {/* User Profile & Logout Button */}
+          {/* User Profile & Interactive Avatar Dropdown Menu */}
           {user && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '4px' }}>
+            <div
+              className="user-dropdown-wrapper"
+              ref={userDropdownRef}
+              style={{
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                marginLeft: '4px',
+                zIndex: 999999
+              }}
+            >
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  padding: '3px 8px 3px 4px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid var(--border-color)',
+                  padding: '3px 10px 3px 4px',
+                  background: isUserMenuOpen ? 'rgba(203, 177, 147, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  border: isUserMenuOpen ? '1px solid #CBB193' : '1px solid var(--border-color)',
                   borderRadius: '20px',
                   fontSize: '11px',
                   fontWeight: '600',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
                 }}
-                onClick={() => setIsMobileDrawerOpen(true)}
-                title={user.email}
+                onClick={() => setIsUserMenuOpen(prev => !prev)}
+                title={`Click xem chi tiết gói & tài khoản (${user.email})`}
               >
                 <img
                   src={user.picture || 'https://lh3.googleusercontent.com/a/default-user'}
                   alt="Avatar"
-                  style={{ width: '18px', height: '18px', borderRadius: '50%', objectFit: 'cover' }}
+                  style={{ width: '20px', height: '20px', borderRadius: '50%', objectFit: 'cover' }}
+                  onError={(e) => { e.currentTarget.src = 'https://lh3.googleusercontent.com/a/default-user'; }}
                 />
                 <span style={{ maxWidth: '85px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {user.name || user.email?.split('@')[0]}
                 </span>
+                <span style={{ fontSize: '8px', opacity: 0.7 }}>▼</span>
               </div>
 
-              <button
-                className="btn"
-                onClick={onLogout}
-                style={{
-                  padding: '3px 8px',
-                  fontSize: '11px',
-                  color: '#ff8a80',
-                  borderColor: 'rgba(255, 82, 82, 0.3)',
-                  background: 'rgba(255, 82, 82, 0.08)',
-                }}
-                title="Đăng xuất khỏi phiên làm việc"
-              >
-                <span>🚪</span>
-                <span>Đăng xuất</span>
-              </button>
+              {/* Desktop Avatar Dropdown Card */}
+              {isUserMenuOpen && (
+                <div
+                  className="user-dropdown-card"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 8px)',
+                    right: 0,
+                    width: '310px',
+                    background: '#121620',
+                    border: '1px solid #283244',
+                    borderRadius: '6px',
+                    padding: '16px',
+                    boxShadow: '0 12px 40px rgba(0, 0, 0, 0.95)',
+                    zIndex: 2147483647,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
+                  }}
+                >
+                  {/* User Profile Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <img
+                      src={user.picture || 'https://lh3.googleusercontent.com/a/default-user'}
+                      alt="Avatar"
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        border: `2px solid ${isSubscribed ? '#CBB193' : '#EF4444'}`
+                      }}
+                      onError={(e) => { e.currentTarget.src = 'https://lh3.googleusercontent.com/a/default-user'; }}
+                    />
+                    <div style={{ overflow: 'hidden' }}>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {user.name || 'Thành Viên'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#8899A6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {user.email}
+                      </div>
+                      <span style={{
+                        display: 'inline-block',
+                        marginTop: '4px',
+                        fontSize: '10px',
+                        fontWeight: '700',
+                        color: isAdmin ? '#F59E0B' : isSubscribed ? '#CBB193' : '#9CA3AF',
+                        background: isAdmin ? 'rgba(245, 158, 11, 0.12)' : isSubscribed ? 'rgba(203, 177, 147, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                        padding: '2px 6px',
+                        borderRadius: '2px',
+                        border: `1px solid ${isAdmin ? 'rgba(245, 158, 11, 0.3)' : isSubscribed ? 'rgba(203, 177, 147, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`
+                      }}>
+                        {isAdmin ? '👑 Quản Trị Viên' : isSubscribed ? '💎 Pro Member' : 'Tài Khoản Thường'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ height: '1px', background: '#1E2638' }} />
+
+                  {/* Subscription Info Box */}
+                  <div style={{
+                    background: '#0B0E14',
+                    border: '1px solid #1E2638',
+                    borderRadius: '4px',
+                    padding: '12px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '11px', color: '#8899A6', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Gói Dịch Vụ
+                      </span>
+                      <span style={{
+                        fontSize: '10px',
+                        fontWeight: '700',
+                        color: isSubscribed ? '#4ADE80' : '#F87171',
+                        background: isSubscribed ? 'rgba(74, 222, 128, 0.12)' : 'rgba(248, 113, 113, 0.12)',
+                        padding: '2px 6px',
+                        borderRadius: '2px',
+                        border: `1px solid ${isSubscribed ? 'rgba(74, 222, 128, 0.3)' : 'rgba(248, 113, 113, 0.3)'}`
+                      }}>
+                        {isSubscribed ? '🟢 ĐANG HOẠT ĐỘNG' : '🔴 HẾT HẠN / CHƯA ĐK'}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#CBB193', marginBottom: '6px' }}>
+                      {planName}
+                    </div>
+
+                    {expiryFormatted && !isAdmin && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', color: '#CBD5E1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#8899A6' }}>Hạn sử dụng:</span>
+                          <span style={{ color: '#00E5FF', fontWeight: '700' }}>{expiryFormatted}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                          <span style={{ color: '#8899A6' }}>Thời gian còn lại:</span>
+                          <span style={{ color: '#4ADE80', fontWeight: '700' }}>Còn {daysLeft} ngày</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {isAdmin && (
+                      <div style={{ fontSize: '11px', color: '#F59E0B' }}>
+                        Tài khoản Quản Trị Viên toàn quyền truy cập vĩnh viễn.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Navigation Links */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {isAdmin && (
+                      <Link
+                        href="/subscription"
+                        onClick={() => setIsUserMenuOpen(false)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 10px',
+                          background: 'rgba(203, 177, 147, 0.1)',
+                          border: '1px solid rgba(203, 177, 147, 0.3)',
+                          borderRadius: '4px',
+                          color: '#CBB193',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          textDecoration: 'none'
+                        }}
+                      >
+                        <span>👑</span>
+                        <span>Trung Tâm Quản Trị Subscription</span>
+                      </Link>
+                    )}
+
+                    {!isSubscribed && !isAdmin && (
+                      <Link
+                        href="/subscription"
+                        onClick={() => setIsUserMenuOpen(false)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 10px',
+                          background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
+                          borderRadius: '4px',
+                          color: '#0B0E14',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          textDecoration: 'none',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <span>💎</span>
+                        <span>Đăng Ký Gói Pro ($15/Tháng)</span>
+                      </Link>
+                    )}
+                  </div>
+
+                  <div style={{ height: '1px', background: '#1E2638' }} />
+
+                  {/* Logout Action */}
+                  <button
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      onLogout?.();
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '8px 12px',
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                      borderRadius: '4px',
+                      color: '#F87171',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span>🚪</span>
+                    <span>Đăng xuất khỏi tài khoản</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -574,32 +818,6 @@ export default function Header({
             </div>
           </div>
 
-          {/* Group 4: System & Token Status */}
-          <div className="mobile-drawer-group">
-            <div className="mobile-group-title">
-              <span>⚡</span>
-              <span>TRẠNG THÁI HỆ THỐNG</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div className={wsBadgeClass} style={{ width: '100%', justifyContent: 'center', padding: '8px 12px' }}>
-                <span className="live-dot" style={{ width: 6, height: 6 }}></span>
-                <span style={{ fontSize: '12px' }}>Máy chủ WebSocket: {wsText}</span>
-              </div>
-
-              <div
-                className={tokenPillClass}
-                style={{ width: '100%', justifyContent: 'center', padding: '8px 12px' }}
-                onClick={() => {
-                  onOpenTokenModal?.();
-                  setIsMobileDrawerOpen(false);
-                }}
-              >
-                <span className="live-dot" style={{ width: 6, height: 6 }}></span>
-                <span style={{ fontSize: '12px' }}>{tokenLabel}</span>
-              </div>
-            </div>
-          </div>
 
           {/* Group 5: Subscription & Admin Panel */}
           <div className="mobile-drawer-group">
@@ -607,25 +825,67 @@ export default function Header({
               <span>{isAdmin ? '👑' : '💎'}</span>
               <span>{isAdmin ? 'QUẢN TRỊ VIÊN' : 'GÓI THÀNH VIÊN PRO'}</span>
             </div>
-            <Link
-              href="/subscription"
-              className="mobile-admin-btn"
-              onClick={() => setIsMobileDrawerOpen(false)}
-              style={{
-                textDecoration: 'none',
-                background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
-                borderColor: 'rgba(203, 177, 147, 0.45)',
-                color: '#CBB193',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                fontWeight: '700'
-              }}
-            >
-              <span>{isAdmin ? '👑' : '💎'}</span>
-              <span>{isAdmin ? 'Tạo Tài Khoản Dùng Thử & Quản Trị' : 'Đăng Ký Gói Pro ($15/Tháng)'}</span>
-            </Link>
+            
+            {isAdmin ? (
+              <Link
+                href="/subscription"
+                className="mobile-admin-btn"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                style={{
+                  textDecoration: 'none',
+                  background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
+                  borderColor: 'rgba(203, 177, 147, 0.45)',
+                  color: '#CBB193',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: '700'
+                }}
+              >
+                <span>👑</span>
+                <span>Tạo Tài Khoản Dùng Thử & Quản Trị</span>
+              </Link>
+            ) : isSubscribed ? (
+              <div
+                style={{
+                  padding: '12px',
+                  background: 'rgba(34, 197, 94, 0.08)',
+                  border: '1px solid rgba(34, 197, 94, 0.25)',
+                  borderRadius: '4px',
+                  color: '#4ADE80',
+                  fontSize: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px'
+                }}
+              >
+                <div style={{ fontWeight: '800' }}>✅ Gói Pro Đang Hoạt Động</div>
+                <div style={{ fontSize: '11px', color: '#A0AEC0' }}>
+                  {planName} {expiryFormatted ? `• Hạn: ${expiryFormatted} (${daysLeft} ngày)` : ''}
+                </div>
+              </div>
+            ) : (
+              <Link
+                href="/subscription"
+                className="mobile-admin-btn"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                style={{
+                  textDecoration: 'none',
+                  background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
+                  borderColor: 'rgba(203, 177, 147, 0.45)',
+                  color: '#CBB193',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: '700'
+                }}
+              >
+                <span>💎</span>
+                <span>Đăng Ký Gói Pro ($15/Tháng)</span>
+              </Link>
+            )}
           </div>
 
           {/* Group 6: Logout Button (Elevated with bottom padding for mobile safe area) */}
@@ -651,6 +911,16 @@ export default function Header({
           display: flex;
           justify-content: space-between;
           align-items: center;
+          z-index: 99999 !important;
+        }
+
+        .user-dropdown-wrapper {
+          position: relative;
+          z-index: 999999 !important;
+        }
+
+        .user-dropdown-card {
+          z-index: 2147483647 !important;
         }
 
         .subscription-btn-highlight {
