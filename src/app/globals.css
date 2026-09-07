@@ -102,6 +102,11 @@ header {
   to { transform: rotate(360deg); }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .ws-status-badge {
   font-size: 10px;
   font-family: 'JetBrains Mono', monospace;

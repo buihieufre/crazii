@@ -22,6 +22,9 @@ export default function TerminalPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isChartReady, setIsChartReady] = useState(false);
+  const [loadingStageText, setLoadingStageText] = useState('Đang kết nối hệ thống...');
+  const isRedirectingRef = useRef(false);
 
   // Single Device Kick-out State
   const [isKickoutModalOpen, setIsKickoutModalOpen] = useState(false);
@@ -161,16 +164,16 @@ export default function TerminalPage() {
     }, 1500);
   }, [getSessionToken]);
 
-  // Initial Auth Check on Mount (Fast & Non-blocking with 1.5s Safety Timeout)
+  // Initial Auth Check on Mount (Fast & Non-blocking with Safety Timeout)
   useEffect(() => {
     let isMounted = true;
 
-    // Safety timeout: Guarantee the loading overlay is dismissed after 1.5 seconds maximum
+    // Safety timeout: Guarantee the loading overlay is dismissed after 2 seconds maximum (unless redirecting)
     const safetyTimer = setTimeout(() => {
-      if (isMounted) {
+      if (isMounted && !isRedirectingRef.current) {
         setIsCheckingAuth(false);
       }
-    }, 1500);
+    }, 2000);
 
     // Check URL parameters for kickout notice
     if (typeof window !== 'undefined') {
@@ -183,79 +186,162 @@ export default function TerminalPage() {
     }
 
     async function verifyAuth() {
+      // 0. Synchronous instant check from cached user (Prevents ANY visual flicker on reload / navigation)
+      if (typeof window !== 'undefined') {
+        try {
+          const cachedRaw = localStorage.getItem('crazii_user');
+          if (cachedRaw) {
+            const cachedUser = JSON.parse(cachedRaw);
+            if (cachedUser) {
+              const isCachedSubActive = Boolean(
+                cachedUser.role === 'admin' ||
+                cachedUser.subscriptionStatus === true ||
+                cachedUser.subscription_status === true ||
+                (cachedUser.subscriptionExpiry && new Date(cachedUser.subscriptionExpiry).getTime() > Date.now()) ||
+                (cachedUser.subscription_expiry && new Date(cachedUser.subscription_expiry).getTime() > Date.now())
+              );
+              if (!isCachedSubActive) {
+                isRedirectingRef.current = true;
+                setLoadingStageText('Đang chuyển hướng sang trang thanh toán...');
+                window.location.replace('/subscription');
+                return;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
       const token = typeof window !== 'undefined' ? localStorage.getItem('crazii_session_token') : null;
 
+      if (!token) {
+        if (isMounted && !isRedirectingRef.current) {
+          setIsAuthenticated(false);
+          setIsCheckingAuth(false);
+        }
+        return;
+      }
+
+      setLoadingStageText('Đang kiểm tra quyền truy cập biểu đồ...');
+
       // 1. Try checking local App Session Token first (Instant & Fastest)
-      if (token) {
-        try {
-          const controller = new AbortController();
-          const reqTimeout = setTimeout(() => controller.abort(), 1200);
+      try {
+        const controller = new AbortController();
+        const reqTimeout = setTimeout(() => controller.abort(), 2500);
 
-          const res = await fetch('/api/auth/me', {
-            headers: { 'Authorization': `Bearer ${token}` },
-            signal: controller.signal
-          });
-          clearTimeout(reqTimeout);
+        const res = await fetch('/api/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: controller.signal
+        });
+        clearTimeout(reqTimeout);
 
-          if (res.ok) {
-            const data = await res.json();
-            if (isMounted) {
-              setCurrentUser(data.user);
-              setIsAuthenticated(true);
-              setIsCheckingAuth(false);
-              clearTimeout(safetyTimer);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            const u = data.user;
+            const isSubActive = Boolean(
+              u?.role === 'admin' ||
+              u?.subscriptionStatus === true ||
+              u?.subscription_status === true ||
+              (u?.subscriptionExpiry && new Date(u.subscriptionExpiry).getTime() > Date.now()) ||
+              (u?.subscription_expiry && new Date(u.subscription_expiry).getTime() > Date.now())
+            );
+
+            if (!isSubActive) {
+              // Not subscribed / Expired -> Redirect immediately to /subscription without mounting chart
+              isRedirectingRef.current = true;
+              setLoadingStageText('Đang chuyển hướng sang trang thanh toán...');
+              if (typeof window !== 'undefined') {
+                try {
+                  const raw = localStorage.getItem('crazii_user') || '{}';
+                  const parsed = JSON.parse(raw);
+                  parsed.subscriptionStatus = false;
+                  parsed.subscription_status = false;
+                  localStorage.setItem('crazii_user', JSON.stringify(parsed));
+                } catch (e) {}
+                window.location.replace('/subscription');
+              }
               return;
             }
-          } else {
-            const errData = await res.json().catch(() => ({}));
-            if (errData.code === 'DEVICE_SESSION_TERMINATED' && isMounted) {
-              setKickoutMessage(errData.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.');
-              setIsKickoutModalOpen(true);
-            }
-            // Token invalid or session terminated by new device
+
+            // Update cache with fresh active user data
             if (typeof window !== 'undefined') {
-              localStorage.removeItem('crazii_session_token');
-              localStorage.removeItem('crazii_user');
+              localStorage.setItem('crazii_user', JSON.stringify(u));
             }
-            if (isMounted) {
-              setIsAuthenticated(false);
-              setCurrentUser(null);
-            }
+
+            setCurrentUser(u);
+            setIsAuthenticated(true);
+            setLoadingStageText('Đang tải dữ liệu biểu đồ...');
+            return;
           }
-        } catch (e) {
-          // Network error / abort
-          if (isMounted) {
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          if (errData.code === 'DEVICE_SESSION_TERMINATED' && isMounted) {
+            setKickoutMessage(errData.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.');
+            setIsKickoutModalOpen(true);
+          }
+          // Token invalid or session terminated by new device
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('crazii_session_token');
+            localStorage.removeItem('crazii_user');
+          }
+          if (isMounted && !isRedirectingRef.current) {
             setIsAuthenticated(false);
             setCurrentUser(null);
+            setIsCheckingAuth(false);
           }
+          return;
         }
+      } catch (e) {
+        // Network error / abort
       }
 
       // 2. Non-blocking Supabase Auth Session check fallback
       try {
         const supabase = createSupabaseClient();
         const supaPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ data: {} }), 800));
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ data: {} }), 1000));
         
         const { data: { session } } = await Promise.race([supaPromise, timeoutPromise]);
         if (session?.user && isMounted) {
-          const userObj = {
-            sub: session.user.id,
-            email: session.user.email,
-            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0],
-            picture: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null,
-          };
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('crazii_session_token', session.access_token);
-            localStorage.setItem('crazii_user', JSON.stringify(userObj));
-          }
-          setCurrentUser(userObj);
-          setIsAuthenticated(true);
+          try {
+            const checkRes = await fetch('/api/auth/me', {
+              headers: { 'Authorization': `Bearer ${session.access_token}` }
+            });
+            if (checkRes.ok) {
+              const checkData = await checkRes.json();
+              const u = checkData.user;
+              const isSubActive = Boolean(
+                u?.role === 'admin' ||
+                u?.subscriptionStatus === true ||
+                u?.subscription_status === true ||
+                (u?.subscriptionExpiry && new Date(u.subscriptionExpiry).getTime() > Date.now()) ||
+                (u?.subscription_expiry && new Date(u.subscription_expiry).getTime() > Date.now())
+              );
+
+              if (!isSubActive) {
+                isRedirectingRef.current = true;
+                setLoadingStageText('Đang chuyển hướng sang trang thanh toán...');
+                if (typeof window !== 'undefined') {
+                  window.location.replace('/subscription');
+                }
+                return;
+              }
+
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('crazii_session_token', session.access_token);
+                localStorage.setItem('crazii_user', JSON.stringify(u));
+              }
+              setCurrentUser(u);
+              setIsAuthenticated(true);
+              setLoadingStageText('Đang tải dữ liệu biểu đồ...');
+              return;
+            }
+          } catch (e) {}
         }
       } catch (supaErr) {
         console.warn('Supabase getSession error:', supaErr);
       } finally {
-        if (isMounted) {
+        if (isMounted && !isRedirectingRef.current) {
           setIsCheckingAuth(false);
           clearTimeout(safetyTimer);
         }
@@ -280,8 +366,7 @@ export default function TerminalPage() {
             localStorage.setItem('crazii_user', JSON.stringify(userObj));
           }
           setCurrentUser(userObj);
-          setIsAuthenticated(true);
-          setIsCheckingAuth(false);
+          verifyAuth();
         }
       });
 
@@ -394,11 +479,14 @@ export default function TerminalPage() {
           if (!isSilent) {
             setNotification({
               type: 'error',
-              message: 'Tài khoản cần kích hoạt gói Subscription (45 USDT/tháng) để sử dụng biểu đồ.'
+              message: 'Tài khoản cần kích hoạt gói Subscription để sử dụng biểu đồ.'
             });
           }
           if (typeof window !== 'undefined' && window.location.pathname !== '/subscription') {
-            window.location.href = '/subscription';
+            isRedirectingRef.current = true;
+            setIsCheckingAuth(true);
+            setLoadingStageText('Đang chuyển hướng sang trang thanh toán...');
+            window.location.replace('/subscription');
           }
         }
         return;
@@ -456,6 +544,12 @@ export default function TerminalPage() {
 
       if (targetChartRef && targetChartRef.current) {
         targetChartRef.current.renderDataset(list, isInitial);
+        if (isInitial && slotIndex === 0) {
+          setTimeout(() => {
+            setIsChartReady(true);
+            setIsCheckingAuth(false);
+          }, 60);
+        }
       }
 
       if (socketRef.current && socketRef.current.connected) {
@@ -558,18 +652,32 @@ export default function TerminalPage() {
       isHydratedRef.current = true;
     }
 
+    // Only load candles once user is authenticated & authorized
+    if (!isAuthenticated) return;
+
     // Trigger immediate historical candle loading for all visible slots
     const visibleCount = hydratedLayout === '1' ? 1 : (hydratedLayout.startsWith('2') ? 2 : (hydratedLayout.startsWith('3') ? 3 : 4));
+    let hasCodes = false;
+
     setTimeout(() => {
       for (let i = 0; i < visibleCount; i++) {
         const code = hydratedSlots?.[i]?.code || (i === 0 ? hydratedCode : null);
         if (code) {
+          hasCodes = true;
           renderedCodesRef.current[i] = code;
           fetchCandlesForSlot(i, code, i > 0, true);
         }
       }
     }, 60);
-  }, [fetchCandlesForSlot]);
+
+    // Fallback release timer so user is never stuck loading
+    const safetyReleaseTimer = setTimeout(() => {
+      setIsChartReady(true);
+      setIsCheckingAuth(false);
+    }, hasCodes ? 600 : 200);
+
+    return () => clearTimeout(safetyReleaseTimer);
+  }, [isAuthenticated, fetchCandlesForSlot]);
 
   // 2. Debounced Autosave on Any Layout / Slot / Timeframe Change
   useEffect(() => {
@@ -815,10 +923,36 @@ export default function TerminalPage() {
     return () => clearInterval(interval);
   }, [currentCode, timeframeMinutes]);
 
-  // Handle Login Success from Google
+  // Handle Login Success from AuthOverlay
   const handleLoginSuccess = useCallback((token, user) => {
+    if (token && typeof window !== 'undefined') {
+      localStorage.setItem('crazii_session_token', token);
+    }
+    if (user && typeof window !== 'undefined') {
+      localStorage.setItem('crazii_user', JSON.stringify(user));
+    }
     setCurrentUser(user);
+
+    const isSubActive = Boolean(
+      user?.role === 'admin' ||
+      user?.subscriptionStatus === true ||
+      user?.subscription_status === true ||
+      (user?.subscriptionExpiry && new Date(user.subscriptionExpiry).getTime() > Date.now()) ||
+      (user?.subscription_expiry && new Date(user.subscription_expiry).getTime() > Date.now())
+    );
+
+    if (!isSubActive) {
+      isRedirectingRef.current = true;
+      setLoadingStageText('Đang chuyển hướng sang trang thanh toán...');
+      if (typeof window !== 'undefined') {
+        window.location.replace('/subscription');
+      }
+      return;
+    }
+
     setIsAuthenticated(true);
+    setLoadingStageText('Đang tải dữ liệu biểu đồ...');
+
     // Reload visible slots on login
     const visibleCount = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
     for (let i = 0; i < visibleCount; i++) {
@@ -1008,13 +1142,96 @@ export default function TerminalPage() {
   // Determine how many slots to display based on layout
   const visibleSlotCount = activeLayout === '1' ? 1 : (activeLayout.startsWith('2') ? 2 : (activeLayout.startsWith('3') ? 3 : 4));
 
-  // 1. Initial Checking Auth Loading Screen
-  if (isCheckingAuth) {
+  // 1. Initial Checking Auth & Chart Initialization Loading Screen (Prevents any flicker)
+  if (isCheckingAuth || (isAuthenticated && !isChartReady)) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b0e14', color: '#00e5ff', fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
-          <span className="spinner" style={{ width: '32px', height: '32px' }} />
-          <span style={{ fontSize: '13px', letterSpacing: '0.5px' }}>Đang kiểm tra trạng thái đăng nhập...</span>
+      <div style={{
+        height: '100vh',
+        width: '100vw',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#0B0E14',
+        color: '#E9E6E7',
+        fontFamily: 'Plus Jakarta Sans, sans-serif',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        zIndex: 9999999,
+        userSelect: 'none'
+      }}>
+        {/* Ambient background glow */}
+        <div style={{
+          position: 'absolute',
+          width: '320px',
+          height: '320px',
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(203, 177, 147, 0.08) 0%, rgba(11, 14, 20, 0) 70%)',
+          pointerEvents: 'none'
+        }} />
+
+        {/* Brand Badge */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          marginBottom: '28px',
+          padding: '8px 18px',
+          background: '#121620',
+          border: '1px solid #222938',
+          borderRadius: '4px',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)'
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
+            color: '#0B0E14',
+            fontWeight: '900',
+            fontSize: '14px',
+            letterSpacing: '2px',
+            padding: '4px 10px',
+            borderRadius: '2px'
+          }}>
+            TRADEWH
+          </div>
+          <span style={{ fontSize: '12px', color: '#8899A6', fontWeight: '700', letterSpacing: '1.5px' }}>
+            PRO TERMINAL
+          </span>
+        </div>
+
+        {/* Spinner with Gold Accent */}
+        <div style={{
+          position: 'relative',
+          width: '44px',
+          height: '44px',
+          marginBottom: '20px'
+        }}>
+          <div style={{
+            width: '44px',
+            height: '44px',
+            border: '3px solid rgba(203, 177, 147, 0.15)',
+            borderTopColor: '#CBB193',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite'
+          }} />
+        </div>
+
+        {/* Loading Text */}
+        <div style={{
+          fontSize: '13px',
+          color: '#CBB193',
+          fontWeight: '600',
+          letterSpacing: '0.5px',
+          marginBottom: '6px'
+        }}>
+          {loadingStageText}
+        </div>
+        <div style={{
+          fontSize: '11px',
+          color: '#6B7C98',
+          letterSpacing: '0.5px'
+        }}>
+          Hệ thống phân tích kỹ thuật thời gian thực
         </div>
       </div>
     );
@@ -1036,7 +1253,7 @@ export default function TerminalPage() {
 
   // 3. Authenticated Dashboard
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0b0e14' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0b0e14', animation: 'fadeIn 0.25s ease-out' }}>
       {/* Top Navigation Header */}
       <Header
         currentCode={currentCode}

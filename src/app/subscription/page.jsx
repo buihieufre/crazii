@@ -101,6 +101,18 @@ function SubscriptionContent() {
       const data = await res.json();
       if (data.success) {
         setSubData(data);
+        try {
+          const raw = localStorage.getItem('crazii_user');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            parsed.subscriptionStatus = Boolean(data.isActive);
+            parsed.subscription_status = Boolean(data.isActive);
+            parsed.subscriptionExpiry = data.subscriptionExpiry || null;
+            parsed.subscription_expiry = data.subscriptionExpiry || null;
+            if (data.isAdmin) parsed.role = 'admin';
+            localStorage.setItem('crazii_user', JSON.stringify(parsed));
+          }
+        } catch (e) {}
       }
     } catch (e) {
       console.error('Failed to fetch subscription status:', e);
@@ -567,14 +579,20 @@ function SubscriptionContent() {
   }
 
   const isActive = Boolean(
-    subData?.subscriptionStatus ||
     subData?.isAdmin ||
+    subData?.subscriptionStatus ||
     (subData?.subscriptionExpiry && new Date(subData.subscriptionExpiry).getTime() > Date.now())
   );
   const daysLeft = subData?.daysLeft || 0;
   const isAdmin = subData?.isAdmin;
-  const expiryDateFormatted = subData?.subscriptionExpiry
-    ? new Date(subData.subscriptionExpiry).toLocaleString('vi-VN', {
+
+  const expiryRaw = subData?.subscriptionExpiry || user?.subscription_expiry || user?.subscriptionExpiry;
+  const expiryTime = expiryRaw ? new Date(expiryRaw).getTime() : 0;
+  const isExpired = Boolean(!isAdmin && !isActive && (subData?.isExpired || (expiryTime > 0 && expiryTime <= Date.now())));
+  const isNotActivated = Boolean(!isAdmin && !isActive && !isExpired);
+
+  const expiryDateFormatted = expiryTime > 0
+    ? new Date(expiryTime).toLocaleString('vi-VN', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
@@ -890,65 +908,132 @@ function SubscriptionContent() {
             </div>
           </div>
         ) : (
-          /* User Current Membership Status Banner (Inactive Notice) */
+          /* User Current Membership Status Banner (Clearly Differentiated: ĐÃ HẾT HẠN vs CHƯA KÍCH HOẠT) */
           subData && (
-            <div style={{
-              width: '100%',
-              maxWidth: '820px',
-              background: '#121620',
-              border: '1px solid #222938',
-              borderRadius: '2px',
-              padding: '18px 24px',
-              marginBottom: '28px',
-              display: 'flex',
-              flexWrap: 'wrap',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '16px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                <div style={{
-                  width: '40px',
-                  height: '40px',
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid #EF4444',
-                  borderRadius: '2px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '18px'
-                }}>
-                  ⚠️
+            isExpired ? (
+              /* CASE 1: ĐÃ HẾT HẠN (Previously had subscription, now expired) */
+              <div style={{
+                width: '100%',
+                maxWidth: '820px',
+                background: '#121620',
+                border: '1px solid rgba(239, 68, 68, 0.45)',
+                borderRadius: '2px',
+                padding: '18px 24px',
+                marginBottom: '28px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '16px',
+                boxShadow: '0 4px 20px rgba(239, 68, 68, 0.08)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid #EF4444',
+                    borderRadius: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '20px'
+                  }}>
+                    ⏳
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#8899A6', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      Tài Khoản: <strong style={{ color: '#E9E6E7' }}>{subData?.email || user?.email}</strong>
+                    </div>
+                    <div style={{ fontSize: '15px', fontWeight: '800', color: '#EF4444', marginTop: '2px', letterSpacing: '0.3px' }}>
+                      GÓI CƯỚC ĐÃ HẾT HẠN
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#CBD5E1', marginTop: '2px' }}>
+                      {expiryDateFormatted ? (
+                        <>Gói cước đã hết hạn vào ngày <strong style={{ color: '#F87171' }}>{expiryDateFormatted}</strong>. Vui lòng gia hạn gói bên dưới để tiếp tục truy cập biểu đồ.</>
+                      ) : (
+                        'Gói cước của bạn đã hết hạn. Vui lòng chọn gói cước bên dưới để gia hạn quyền truy cập biểu đồ phân tích.'
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Tài Khoản: <strong style={{ color: '#E9E6E7' }}>{subData.email}</strong>
-                  </div>
-                  <div style={{ fontSize: '15px', fontWeight: '700', color: '#EF4444', marginTop: '2px' }}>
-                    CHƯA KÍCH HOẠT GÓI HOẶC ĐÃ HẾT HẠN
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#A0AEC0', marginTop: '2px' }}>
-                    Vui lòng chọn gói cước bên dưới để kích hoạt quyền truy cập biểu đồ phân tích.
-                  </div>
-                </div>
-              </div>
 
-              <div>
-                <span style={{
-                  padding: '6px 12px',
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  color: '#F87171',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  borderRadius: '2px',
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  CHƯA KÍCH HOẠT
-                </span>
+                <div>
+                  <span style={{
+                    padding: '6px 14px',
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    color: '#F87171',
+                    border: '1px solid rgba(239, 68, 68, 0.45)',
+                    borderRadius: '2px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    🔴 ĐÃ HẾT HẠN
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : (
+              /* CASE 2: CHƯA KÍCH HOẠT (Never had subscription or never activated) */
+              <div style={{
+                width: '100%',
+                maxWidth: '820px',
+                background: '#121620',
+                border: '1px solid #283244',
+                borderRadius: '2px',
+                padding: '18px 24px',
+                marginBottom: '28px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '16px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    background: 'rgba(203, 177, 147, 0.1)',
+                    border: '1px solid #CBB193',
+                    borderRadius: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '20px'
+                  }}>
+                    🔒
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#8899A6', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      Tài Khoản: <strong style={{ color: '#E9E6E7' }}>{subData?.email || user?.email}</strong>
+                    </div>
+                    <div style={{ fontSize: '15px', fontWeight: '800', color: '#CBB193', marginTop: '2px', letterSpacing: '0.3px' }}>
+                      CHƯA KÍCH HOẠT GÓI CƯỚC
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#A0AEC0', marginTop: '2px' }}>
+                      Tài khoản chưa từng đăng ký gói cước. Vui lòng chọn gói cước bên dưới để kích hoạt quyền truy cập biểu đồ phân tích.
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <span style={{
+                    padding: '6px 14px',
+                    background: 'rgba(203, 177, 147, 0.12)',
+                    color: '#CBB193',
+                    border: '1px solid rgba(203, 177, 147, 0.35)',
+                    borderRadius: '2px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    ⚪ CHƯA KÍCH HOẠT
+                  </span>
+                </div>
+              </div>
+            )
           )
         )}
 

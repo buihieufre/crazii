@@ -987,6 +987,33 @@ nextApp.prepare().then(() => {
     }
   }, 30000);
 
+  // Background Scheduler: Periodically scan & sync expired subscriptions (every 10 minutes)
+  async function autoExpireSubscriptions() {
+    try {
+      if (prisma && prisma.user) {
+        const now = new Date();
+        const res = await prisma.user.updateMany({
+          where: {
+            subscription_status: true,
+            subscription_expiry: { lte: now },
+            role: { not: 'admin' }
+          },
+          data: {
+            subscription_status: false
+          }
+        });
+        if (res.count > 0) {
+          console.log(`[Auto-Expire Worker] ⏰ Automatically flipped ${res.count} expired subscription(s) to subscription_status = false.`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[Auto-Expire Worker Notice]:`, err.message);
+    }
+  }
+
+  setTimeout(autoExpireSubscriptions, 5000);
+  setInterval(autoExpireSubscriptions, 10 * 60 * 1000);
+
   // ==========================================
   // AUTHENTICATION & OTP EMAIL VERIFICATION
   // ==========================================
@@ -1811,10 +1838,36 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     const isActive = isUserSubscriptionActive(dbUser);
 
     let daysLeft = 0;
-    if (dbUser.subscriptionExpiry) {
-      const diffMs = new Date(dbUser.subscriptionExpiry).getTime() - Date.now();
-      daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+    let isExpired = false;
+    let isNotActivated = false;
+
+    const expiryTime = dbUser.subscriptionExpiry ? new Date(dbUser.subscriptionExpiry).getTime() : 0;
+    if (expiryTime > 0) {
+      if (expiryTime > Date.now()) {
+        const diffMs = expiryTime - Date.now();
+        daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      } else {
+        isExpired = true;
+      }
+    } else {
+      isNotActivated = true;
     }
+
+    // Lazy sync in DB: If subscription is expired, asynchronously set subscription_status = false
+    if (isExpired && !isAdmin && (dbUser.subscription_status === true || dbUser.subscriptionStatus === true)) {
+      const targetUserId = dbUser.id || dbUser.sub;
+      if (prisma && prisma.user && targetUserId) {
+        prisma.user.update({
+          where: { id: targetUserId },
+          data: { subscription_status: false }
+        }).catch(() => {});
+      }
+      if (supabaseServer && targetUserId) {
+        supabaseServer.from('users').update({ subscription_status: false }).eq('id', targetUserId).catch(() => {});
+      }
+    }
+
+    const subscriptionState = isAdmin ? 'admin' : (isActive ? 'active' : (isExpired ? 'expired' : 'not_activated'));
 
     return res.json({
       success: true,
@@ -1822,6 +1875,9 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       subscriptionExpiry: dbUser.subscriptionExpiry || null,
       daysLeft: (isAdmin && isActive && !dbUser.subscriptionExpiry) ? 9999 : daysLeft,
       isAdmin: isAdmin,
+      isExpired: !isAdmin && isExpired,
+      isNotActivated: !isAdmin && isNotActivated,
+      subscriptionState,
       role: isAdmin ? 'admin' : (dbUser.role || 'user'),
       email: dbUser.email,
       name: dbUser.name

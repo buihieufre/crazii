@@ -80,11 +80,18 @@ export default function Header({
   const expiryRaw = user?.subscriptionExpiry || user?.subscription_expiry;
   let expiryFormatted = null;
   let daysLeft = 0;
+  let isExpired = false;
+  let isNotActivated = false;
+
   if (expiryRaw) {
     const expTime = new Date(expiryRaw).getTime();
     if (!isNaN(expTime)) {
-      const diff = expTime - Date.now();
-      daysLeft = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+      if (expTime > Date.now()) {
+        const diff = expTime - Date.now();
+        daysLeft = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+      } else {
+        isExpired = true;
+      }
       expiryFormatted = new Date(expiryRaw).toLocaleString('vi-VN', {
         hour: '2-digit',
         minute: '2-digit',
@@ -93,10 +100,14 @@ export default function Header({
         month: '2-digit',
         year: 'numeric'
       });
+    } else {
+      isNotActivated = true;
     }
+  } else {
+    isNotActivated = true;
   }
 
-  let planName = 'Chưa kích hoạt';
+  let planName = 'Chưa đăng ký gói cước';
   if (isAdmin) {
     planName = 'Quản Trị Viên (Admin Access)';
   } else if (isSubscribed) {
@@ -106,6 +117,8 @@ export default function Header({
     } else {
       planName = 'Gói Pro Tiêu Chuẩn (1 Tháng)';
     }
+  } else if (isExpired) {
+    planName = 'Gói Pro (Đã hết hạn)';
   }
 
   // Close dropdown on click outside
@@ -504,7 +517,7 @@ export default function Header({
                         height: '42px',
                         borderRadius: '50%',
                         objectFit: 'cover',
-                        border: `2px solid ${isSubscribed ? '#CBB193' : '#EF4444'}`
+                        border: `2px solid ${isSubscribed ? '#CBB193' : isExpired ? '#EF4444' : '#64748B'}`
                       }}
                       onError={(e) => { e.currentTarget.src = 'https://lh3.googleusercontent.com/a/default-user'; }}
                     />
@@ -520,13 +533,13 @@ export default function Header({
                         marginTop: '4px',
                         fontSize: '10px',
                         fontWeight: '700',
-                        color: isAdmin ? '#F59E0B' : isSubscribed ? '#CBB193' : '#9CA3AF',
-                        background: isAdmin ? 'rgba(245, 158, 11, 0.12)' : isSubscribed ? 'rgba(203, 177, 147, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                        color: isAdmin ? '#F59E0B' : isSubscribed ? '#CBB193' : isExpired ? '#F87171' : '#94A3B8',
+                        background: isAdmin ? 'rgba(245, 158, 11, 0.12)' : isSubscribed ? 'rgba(203, 177, 147, 0.15)' : isExpired ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255, 255, 255, 0.05)',
                         padding: '2px 6px',
                         borderRadius: '2px',
-                        border: `1px solid ${isAdmin ? 'rgba(245, 158, 11, 0.3)' : isSubscribed ? 'rgba(203, 177, 147, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`
+                        border: `1px solid ${isAdmin ? 'rgba(245, 158, 11, 0.3)' : isSubscribed ? 'rgba(203, 177, 147, 0.3)' : isExpired ? 'rgba(239, 68, 68, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`
                       }}>
-                        {isAdmin ? '👑 Quản Trị Viên' : isSubscribed ? '💎 Pro Member' : 'Tài Khoản Thường'}
+                        {isAdmin ? '👑 Quản Trị Viên' : isSubscribed ? '💎 Pro Member' : isExpired ? '⚠️ Đã Hết Hạn' : '⚪ Chưa Kích Hoạt'}
                       </span>
                     </div>
                   </div>
@@ -547,13 +560,13 @@ export default function Header({
                       <span style={{
                         fontSize: '10px',
                         fontWeight: '700',
-                        color: isSubscribed ? '#4ADE80' : '#F87171',
-                        background: isSubscribed ? 'rgba(74, 222, 128, 0.12)' : 'rgba(248, 113, 113, 0.12)',
+                        color: isSubscribed ? '#4ADE80' : isExpired ? '#F87171' : '#94A3B8',
+                        background: isSubscribed ? 'rgba(74, 222, 128, 0.12)' : isExpired ? 'rgba(248, 113, 113, 0.12)' : 'rgba(148, 163, 184, 0.12)',
                         padding: '2px 6px',
                         borderRadius: '2px',
-                        border: `1px solid ${isSubscribed ? 'rgba(74, 222, 128, 0.3)' : 'rgba(248, 113, 113, 0.3)'}`
+                        border: `1px solid ${isSubscribed ? 'rgba(74, 222, 128, 0.3)' : isExpired ? 'rgba(248, 113, 113, 0.3)' : 'rgba(148, 163, 184, 0.25)'}`
                       }}>
-                        {isSubscribed ? '🟢 ĐANG HOẠT ĐỘNG' : '🔴 HẾT HẠN / CHƯA ĐK'}
+                        {isSubscribed ? '🟢 ĐANG HOẠT ĐỘNG' : isExpired ? '🔴 ĐÃ HẾT HẠN' : '⚪ CHƯA KÍCH HOẠT'}
                       </span>
                     </div>
 
@@ -561,7 +574,7 @@ export default function Header({
                       {planName}
                     </div>
 
-                    {expiryFormatted && !isAdmin && (
+                    {isSubscribed && expiryFormatted && !isAdmin && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', color: '#CBD5E1' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: '#8899A6' }}>Hạn sử dụng:</span>
@@ -571,6 +584,26 @@ export default function Header({
                           <span style={{ color: '#8899A6' }}>Thời gian còn lại:</span>
                           <span style={{ color: '#4ADE80', fontWeight: '700' }}>Còn {daysLeft} ngày</span>
                         </div>
+                      </div>
+                    )}
+
+                    {isExpired && !isAdmin && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', color: '#CBD5E1' }}>
+                        {expiryFormatted && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#8899A6' }}>Đã hết hạn vào:</span>
+                            <span style={{ color: '#F87171', fontWeight: '700' }}>{expiryFormatted}</span>
+                          </div>
+                        )}
+                        <div style={{ color: '#F87171', fontSize: '10px', marginTop: '2px' }}>
+                          ⚠️ Gói đã hết hạn. Vui lòng gia hạn để tiếp tục sử dụng.
+                        </div>
+                      </div>
+                    )}
+
+                    {isNotActivated && !isAdmin && (
+                      <div style={{ fontSize: '11px', color: '#8899A6', marginTop: '2px' }}>
+                        Tài khoản chưa từng đăng ký gói cước nào.
                       </div>
                     )}
 
@@ -865,6 +898,26 @@ export default function Header({
                   {planName} {expiryFormatted ? `• Hạn: ${expiryFormatted} (${daysLeft} ngày)` : ''}
                 </div>
               </div>
+            ) : isExpired ? (
+              <Link
+                href="/subscription"
+                className="mobile-admin-btn"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                style={{
+                  textDecoration: 'none',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  borderColor: 'rgba(239, 68, 68, 0.35)',
+                  color: '#F87171',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: '700'
+                }}
+              >
+                <span>⏳</span>
+                <span>Gói Cước Đã Hết Hạn - Gia Hạn Ngay</span>
+              </Link>
             ) : (
               <Link
                 href="/subscription"
@@ -883,7 +936,7 @@ export default function Header({
                 }}
               >
                 <span>💎</span>
-                <span>Đăng Ký Gói Pro ($15/Tháng)</span>
+                <span>Chưa Kích Hoạt - Đăng Ký Gói Pro</span>
               </Link>
             )}
           </div>
