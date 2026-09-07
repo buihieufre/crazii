@@ -87,12 +87,16 @@ function isUserAdmin(user) {
 
 function isUserSubscriptionActive(user) {
   if (!user) return false;
-  if (isUserAdmin(user)) return true;
+  // If explicitly cancelled or marked inactive
+  if (user.subscription_status === false || user.subscriptionStatus === false) {
+    return false;
+  }
   const expiry = user.subscriptionExpiry || user.subscription_expiry;
   if (expiry) {
     const expiryTime = new Date(expiry).getTime();
     return !isNaN(expiryTime) && expiryTime > Date.now();
   }
+  if (isUserAdmin(user)) return true;
   return false;
 }
 
@@ -1810,12 +1814,111 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       success: true,
       subscriptionStatus: isActive,
       subscriptionExpiry: dbUser.subscriptionExpiry || null,
-      daysLeft: isAdmin ? 9999 : daysLeft,
+      daysLeft: (isAdmin && isActive && !dbUser.subscriptionExpiry) ? 9999 : daysLeft,
       isAdmin: isAdmin,
       role: isAdmin ? 'admin' : (dbUser.role || 'user'),
       email: dbUser.email,
       name: dbUser.name
     });
+  });
+
+  // POST /api/subscription/cancel (Admin-Only: Cancel/Revoke user subscription with confirmation)
+  app.post('/api/subscription/cancel', requireAuthAndDevice, async (req, res) => {
+    try {
+      const user = req.user;
+
+      // 🛡️ Strict Admin-Only Authorization
+      if (!isUserAdmin(user)) {
+        return res.status(403).json({
+          success: false,
+          code: 'ADMIN_REQUIRED',
+          message: 'Chỉ Quản trị viên (Admin) mới có quyền thu hồi hoặc hủy gói cước của người dùng.'
+        });
+      }
+
+      const { targetEmail } = req.body || {};
+      const emailToCancel = (targetEmail || '').toLowerCase().trim();
+
+      if (!emailToCancel) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vui lòng cung cấp email của tài khoản cần hủy gói cước.'
+        });
+      }
+
+      const targetUser = (await findUserByEmail(emailToCancel)) || (await findUserById(emailToCancel));
+      if (!targetUser) {
+        return res.status(404).json({
+          success: false,
+          code: 'USER_NOT_FOUND',
+          message: `Không tìm thấy tài khoản người dùng với email "${emailToCancel}".`
+        });
+      }
+
+      const userId = String(targetUser.id || targetUser.sub || '').trim();
+
+      // Update Prisma User
+      if (prisma && prisma.user) {
+        try {
+          await prisma.user.update({
+            where: { id: userId },
+            data: {
+              subscription_status: false,
+              subscription_expiry: null
+            }
+          });
+        } catch (dbErr) {
+          console.warn(`[Subscription Cancel] Prisma update notice:`, dbErr.message);
+        }
+
+        try {
+          await prisma.subscriptionOrder.updateMany({
+            where: {
+              OR: [
+                { user_id: userId },
+                { email: emailToCancel }
+              ],
+              status: { in: ['waiting', 'pending'] }
+            },
+            data: { status: 'cancelled' }
+          });
+        } catch (e) {}
+      }
+
+      // Update Supabase users
+      if (supabaseServer) {
+        try {
+          await supabaseServer.from('users').update({
+            subscription_status: false,
+            subscription_expiry: null
+          }).eq('id', userId);
+        } catch (supErr) {
+          console.warn(`[Subscription Cancel] Supabase update notice:`, supErr.message);
+        }
+
+        try {
+          await supabaseServer.from('subscription_orders').update({
+            status: 'cancelled'
+          }).eq('user_id', userId).in('status', ['waiting', 'pending']);
+        } catch (e) {}
+      }
+
+      console.log(`[Subscription Cancel] 🛑 Cancelled subscription for: ${emailToCancel} (Requested by: ${user.email})`);
+
+      return res.json({
+        success: true,
+        message: `Hủy gói cước thành công cho tài khoản ${emailToCancel}. Tài khoản đã chuyển về trạng thái Chưa kích hoạt.`,
+        subscriptionStatus: false,
+        subscriptionExpiry: null,
+        daysLeft: 0
+      });
+    } catch (err) {
+      console.error(`[Subscription Cancel Error]:`, err.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Lỗi máy chủ khi hủy gói cước: ' + err.message
+      });
+    }
   });
 
   // POST /api/payment/create-invoice & POST /api/payment/create (Create Direct Crypto Payment)

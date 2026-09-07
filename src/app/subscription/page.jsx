@@ -43,6 +43,12 @@ function SubscriptionContent() {
   const [adminMsg, setAdminMsg] = useState(null);
   const [adminLoading, setAdminLoading] = useState(false);
 
+  // Cancel Subscription Dialog States
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancellingSub, setCancellingSub] = useState(false);
+  const [cancelTargetEmail, setCancelTargetEmail] = useState(null);
+  const [cancelError, setCancelError] = useState(null);
+
   // Retrieve session token from localStorage
   function getSessionToken() {
     if (typeof window === 'undefined') return null;
@@ -100,6 +106,48 @@ function SubscriptionContent() {
       console.error('Failed to fetch subscription status:', e);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Handle Cancel Subscription Execution
+  async function handleCancelSubscription(targetEmail = null) {
+    const token = getSessionToken();
+    if (!token) {
+      router.push('/?auth=login');
+      return;
+    }
+
+    setCancellingSub(true);
+    setCancelError(null);
+
+    try {
+      const res = await fetch('/api/subscription/cancel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          targetEmail: targetEmail || undefined
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsCancelModalOpen(false);
+        setCancelTargetEmail(null);
+        setMessage({
+          type: 'success',
+          text: data.message || '🎉 Đã hủy gói cước thành công. Tài khoản đã chuyển về trạng thái Chưa kích hoạt.'
+        });
+        await fetchSubscriptionData();
+      } else {
+        setCancelError(data.message || 'Không thể hủy gói cước. Vui lòng thử lại sau.');
+      }
+    } catch (err) {
+      setCancelError('Lỗi kết nối khi hủy gói cước: ' + err.message);
+    } finally {
+      setCancellingSub(false);
     }
   }
 
@@ -1424,20 +1472,43 @@ function SubscriptionContent() {
                           <span style={{ color: '#F59E0B' }}>{acc.password}</span>
                           <span style={{ color: '#6B7C98', fontSize: '11px', marginLeft: '6px' }}>({acc.days}d)</span>
                         </div>
-                        <button
-                          onClick={() => handleCopyText(formatFullAccountMessage(acc), `hist-${idx}`)}
-                          style={{
-                            padding: '3px 8px',
-                            background: copiedKey === `hist-${idx}` ? 'rgba(34, 197, 94, 0.2)' : '#1A202C',
-                            color: copiedKey === `hist-${idx}` ? '#4ADE80' : '#E9E6E7',
-                            border: '1px solid #222938',
-                            borderRadius: '2px',
-                            fontSize: '11px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {copiedKey === `hist-${idx}` ? '✓ Đã chép' : '📋 Chép'}
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCancelTargetEmail(acc.email);
+                              setCancelError(null);
+                              setIsCancelModalOpen(true);
+                            }}
+                            style={{
+                              padding: '3px 8px',
+                              background: 'rgba(239, 68, 68, 0.12)',
+                              color: '#F87171',
+                              border: '1px solid rgba(239, 68, 68, 0.35)',
+                              borderRadius: '2px',
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                            title="Hủy / thu hồi gói cước của tài khoản này"
+                          >
+                            🛑 Hủy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyText(formatFullAccountMessage(acc), `hist-${idx}`)}
+                            style={{
+                              padding: '3px 8px',
+                              background: copiedKey === `hist-${idx}` ? 'rgba(34, 197, 94, 0.2)' : '#1A202C',
+                              color: copiedKey === `hist-${idx}` ? '#4ADE80' : '#E9E6E7',
+                              border: '1px solid #222938',
+                              borderRadius: '2px',
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {copiedKey === `hist-${idx}` ? '✓ Đã chép' : '📋 Chép'}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1528,11 +1599,264 @@ function SubscriptionContent() {
                 >
                   {adminLoading ? 'Đang cấp...' : `🎁 Cấp ${adminDays} Ngày`}
                 </button>
+                <button
+                  type="button"
+                  disabled={adminLoading || !adminTargetEmail.trim()}
+                  onClick={() => {
+                    if (!adminTargetEmail.trim()) return;
+                    setCancelTargetEmail(adminTargetEmail.trim());
+                    setCancelError(null);
+                    setIsCancelModalOpen(true);
+                  }}
+                  style={{
+                    padding: '8px 14px',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    color: '#F87171',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: '2px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: (adminLoading || !adminTargetEmail.trim()) ? 'not-allowed' : 'pointer'
+                  }}
+                  title="Hủy/Thu hồi gói cước của tài khoản này"
+                >
+                  🛑 Thu Hồi / Hủy Gói
+                </button>
               </form>
             </div>
 
           </div>
         )}
+
+      {/* CONFIRMATION MODAL: CANCEL SUBSCRIPTION DIALOG */}
+      {isCancelModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(11, 14, 20, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px',
+          zIndex: 99999
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '460px',
+            background: 'linear-gradient(180deg, #181C28 0%, #0F131D 100%)',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            borderRadius: '4px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 35px rgba(239, 68, 68, 0.15)',
+            overflow: 'hidden',
+            position: 'relative'
+          }}>
+            {/* Top Red Accent Bar */}
+            <div style={{
+              height: '3px',
+              width: '100%',
+              background: 'linear-gradient(90deg, #EF4444 0%, #DC2626 50%, #B91C1C 100%)'
+            }} />
+
+            {/* Modal Header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '18px 22px 14px 22px',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.06)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '4px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px'
+                }}>
+                  ⚠️
+                </div>
+                <div>
+                  <h3 style={{
+                    margin: 0,
+                    fontSize: '15px',
+                    fontWeight: '800',
+                    color: '#F87171',
+                    letterSpacing: '0.5px',
+                    textTransform: 'uppercase'
+                  }}>
+                    Xác Nhận Thu Hồi / Hủy Gói Cước
+                  </h3>
+                  <div style={{ fontSize: '11px', color: '#8F9CAE', marginTop: '2px' }}>
+                    ADMIN CONSOLE // REVOKE USER ACCESS
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!cancellingSub) {
+                    setIsCancelModalOpen(false);
+                    setCancelTargetEmail(null);
+                    setCancelError(null);
+                  }
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#6B7C98',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  lineHeight: 1
+                }}
+                disabled={cancellingSub}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{ padding: '20px 22px' }}>
+              {/* Target User Info Card */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '3px',
+                padding: '12px 14px',
+                marginBottom: '16px'
+              }}>
+                <div style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Tài khoản người dùng cần thu hồi:
+                </div>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: '#E9E6E7', marginTop: '3px', wordBreak: 'break-all' }}>
+                  {cancelTargetEmail || adminTargetEmail || subData?.email || user?.email}
+                </div>
+              </div>
+
+              {/* Warning Notice */}
+              <div style={{
+                fontSize: '13px',
+                color: '#CBD5E1',
+                lineHeight: 1.6,
+                marginBottom: '16px'
+              }}>
+                <p style={{ margin: '0 0 10px 0', fontWeight: '600', color: '#F87171' }}>
+                  Quản trị viên có chắc chắn muốn thu hồi gói cước của người dùng này?
+                </p>
+                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#94A3B8', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <li>Quyền truy cập vào <strong>dữ liệu nến thời gian thực</strong> của tài khoản này sẽ dừng ngay lập tức.</li>
+                  <li>Tài khoản sẽ chuyển về trạng thái <strong>Chưa kích hoạt (Inactive)</strong>.</li>
+                  <li>Người dùng này vẫn có thể tự gia hạn hoặc bạn có thể cấp lại dùng thử sau này.</li>
+                </ul>
+              </div>
+
+              {/* Error Banner inside Modal if any */}
+              {cancelError && (
+                <div style={{
+                  padding: '10px 12px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  borderRadius: '3px',
+                  color: '#FCA5A5',
+                  fontSize: '12px',
+                  marginBottom: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span>⚠️</span>
+                  <span>{cancelError}</span>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: '10px',
+                marginTop: '10px'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!cancellingSub) {
+                      setIsCancelModalOpen(false);
+                      setCancelTargetEmail(null);
+                      setCancelError(null);
+                    }
+                  }}
+                  disabled={cancellingSub}
+                  style={{
+                    padding: '10px 18px',
+                    background: '#1A202C',
+                    color: '#94A3B8',
+                    border: '1px solid #2D3748',
+                    borderRadius: '2px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: cancellingSub ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  GIỮ LẠI GÓI
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleCancelSubscription(cancelTargetEmail)}
+                  disabled={cancellingSub}
+                  style={{
+                    padding: '10px 20px',
+                    background: cancellingSub ? '#991B1B' : '#EF4444',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '2px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    letterSpacing: '0.5px',
+                    cursor: cancellingSub ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 4px 14px rgba(239, 68, 68, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {cancellingSub ? (
+                    <>
+                      <span style={{
+                        display: 'inline-block',
+                        width: '12px',
+                        height: '12px',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: '#FFFFFF',
+                        borderRadius: '50%',
+                        animation: 'spin 0.8s linear infinite'
+                      }} />
+                      <span>ĐANG HỦY GÓI...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🛑</span>
+                      <span>XÁC NHẬN HỦY GÓI</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       </main>
     </div>
