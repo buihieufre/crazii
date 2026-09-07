@@ -1370,24 +1370,6 @@ function SubscriptionContent() {
                   >
                     <span>{checkingStatus ? '⏳ ĐANG KIỂM TRA...' : '🔄 KIỂM TRA THANH TOÁN (SYNC)'}</span>
                   </button>
-
-                  {/* Dev / Admin Simulation Confirm Button */}
-                  <button
-                    onClick={handleSimulateConfirm}
-                    disabled={simulating}
-                    style={{
-                      padding: '11px 16px',
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      color: '#E9E6E7',
-                      border: '1px solid #252A38',
-                      borderRadius: '2px',
-                      fontSize: '12px',
-                      cursor: simulating ? 'not-allowed' : 'pointer'
-                    }}
-                    title="Mô phỏng xác nhận thanh toán blockchain để kiểm tra luồng"
-                  >
-                    {simulating ? 'Đang kích hoạt...' : '⚡ Mô Phỏng Xác Nhận Nhanh (Test)'}
-                  </button>
                 </div>
               </div>
             )}
