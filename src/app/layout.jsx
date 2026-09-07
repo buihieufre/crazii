@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'TRADEWH.COM | Real-Time Live Streaming Chart Terminal',
+  title: 'TRADEWH',
   description: 'Next.js Pro Trading Terminal with TradingView Lightweight Charts and WebSocket streaming',
   icons: {
     icon: [

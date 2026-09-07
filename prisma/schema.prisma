@@ -58,3 +58,11 @@ model SubscriptionOrder {
 
   @@map("subscription_orders")
 }
+
+model SystemSetting {
+  key        String   @id
+  value      String   @db.Text
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("system_settings")
+}

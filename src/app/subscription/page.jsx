@@ -22,9 +22,9 @@ function SubscriptionContent() {
   const [simulating, setSimulating] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(false);
 
-  // Network & Price Selection States (Default USDT on BSC with $1.00 Test Price)
+  // Network & Price Selection States (Official Plan: $45.00 USDT)
   const [selectedNetwork, setSelectedNetwork] = useState('bsc'); // 'bsc' (BEP-20) or 'eth' (ERC-20)
-  const [selectedPrice, setSelectedPrice] = useState('1.00'); // '1.00' (test) or '15.00' (standard)
+  const [selectedPrice, setSelectedPrice] = useState('45.00'); // Gói chính thức duy nhất: $45.00 USD
 
   // Admin Tool 1: Random Trial Generator state
   const [genDays, setGenDays] = useState(3);
@@ -164,6 +164,9 @@ function SubscriptionContent() {
   }
 
   useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.title = 'TRADEWH';
+    }
     try {
       const rawUser = localStorage.getItem('crazii_user');
       if (rawUser) {
@@ -220,7 +223,7 @@ function SubscriptionContent() {
 
               setMessage({
                 type: 'success',
-                text: '🎉 Giao dịch thành công! Gói thành viên Pro đã được kích hoạt (+30 ngày). Đang chuyển hướng sang biểu đồ...'
+                text: '🎉 Giao dịch thành công! Gói TRADEWH Pro (30 Ngày) đã được kích hoạt (+30 ngày). Đang chuyển hướng sang biểu đồ...'
               });
               fetchSubscriptionData();
 
@@ -391,7 +394,7 @@ function SubscriptionContent() {
     setMessage(null);
 
     const networkName = selectedNetwork === 'eth' ? 'ETH (ERC-20)' : 'BSC (BEP-20)';
-    const effectivePrice = (selectedNetwork === 'eth' && selectedPrice === '1.00') ? '2.00' : selectedPrice;
+    const effectivePrice = '45.00';
 
     try {
       const res = await fetch('/api/payment/create-invoice', {
@@ -464,7 +467,7 @@ function SubscriptionContent() {
 
                 setMessage({
                   type: 'success',
-                  text: '🎉 Thanh toán thành công! Gói thành viên TRADEWH Pro đã được kích hoạt (+30 ngày). Đang chuyển hướng sang biểu đồ...'
+                  text: '🎉 Thanh toán thành công! Gói TRADEWH Pro (30 Ngày) đã được kích hoạt (+30 ngày). Đang chuyển hướng sang biểu đồ...'
                 });
                 await fetchSubscriptionData();
 
@@ -532,7 +535,7 @@ function SubscriptionContent() {
 
         setMessage({
           type: 'success',
-          text: `🎉 Xác nhận thanh toán thành công! Gói Pro đã kích hoạt +30 ngày. Đang chuyển hướng sang biểu đồ...`
+          text: `🎉 Xác nhận thanh toán thành công! Gói TRADEWH Pro (30 Ngày) đã kích hoạt +30 ngày. Đang chuyển hướng sang biểu đồ...`
         });
         await fetchSubscriptionData();
 
@@ -588,7 +591,7 @@ function SubscriptionContent() {
 
         setMessage({
           type: 'success',
-          text: `⚡ Đã mô phỏng thanh toán thành công! Gói Pro đã được gia hạn +30 ngày. Đang chuyển hướng sang biểu đồ...`
+          text: `⚡ Đã mô phỏng thanh toán thành công! Gói TRADEWH Pro (30 Ngày) đã được gia hạn +30 ngày. Đang chuyển hướng sang biểu đồ...`
         });
         await fetchSubscriptionData();
 
@@ -1076,201 +1079,122 @@ function SubscriptionContent() {
             position: 'relative'
           }}>
             
-            {/* Architectural Tags Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  color: '#CBB193',
-                  background: 'rgba(203, 177, 147, 0.1)',
-                  border: '1px solid rgba(203, 177, 147, 0.3)',
-                  padding: '3px 8px',
+            {/* Single Official Subscription Plan Card */}
+            <div style={{ marginBottom: '20px' }}>
+              <div
+                style={{
+                  padding: '20px 24px',
+                  background: 'rgba(203, 177, 147, 0.08)',
+                  border: '1.5px solid #CBB193',
                   borderRadius: '2px',
-                  letterSpacing: '1px'
-                }}>
-                  GÓI: PRO TERMINAL
-                </span>
-                <span style={{
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  color: '#00E5FF',
-                  background: 'rgba(0, 229, 255, 0.1)',
-                  border: '1px solid rgba(0, 229, 255, 0.3)',
-                  padding: '3px 8px',
-                  borderRadius: '2px',
-                  letterSpacing: '1px'
-                }}>
-                  GIA HẠN THỦ CÔNG (30 NGÀY)
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '11px', color: '#26A17B', background: 'rgba(38, 161, 123, 0.15)', border: '1px solid rgba(38, 161, 123, 0.4)', padding: '3px 8px', borderRadius: '2px', fontWeight: 'bold' }}>
-                  ₮ USDT (Tether)
-                </span>
-              </div>
-            </div>
-
-            {/* Price Selection Options (Test $1 vs Standard $15) */}
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                1. Chọn Mức Phí Gói:
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                
-                {/* Option 1: Test Mode ($1 BSC / $2 ETH) */}
-                <div
-                  onClick={() => setSelectedPrice(selectedNetwork === 'eth' ? '2.00' : '1.00')}
-                  style={{
-                    padding: '14px 16px',
-                    background: (selectedPrice === '1.00' || selectedPrice === '2.00') ? 'rgba(203, 177, 147, 0.12)' : '#0E1118',
-                    border: `1px solid ${(selectedPrice === '1.00' || selectedPrice === '2.00') ? '#CBB193' : '#222938'}`,
-                    borderRadius: '2px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <strong style={{ fontSize: '13px', color: (selectedPrice === '1.00' || selectedPrice === '2.00') ? '#CBB193' : '#E9E6E7' }}>
-                      🧪 Gói Test Thử Nghiệm
+                  boxShadow: '0 4px 20px rgba(203, 177, 147, 0.08)',
+                  position: 'relative'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '20px' }}>💎</span>
+                    <strong style={{ fontSize: '16px', color: '#CBB193', letterSpacing: '0.5px' }}>
+                      Gói TRADEWH Pro (30 Ngày)
                     </strong>
-                    <span style={{ fontSize: '10px', color: '#4ADE80', fontWeight: '700', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 6px', borderRadius: '2px' }}>
-                      BẢN THỬ NGHIỆM
-                    </span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '24px', fontWeight: '900', color: '#FFFFFF' }}>
-                      ${selectedNetwork === 'eth' ? '2.00' : '1.00'}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#6B7C98' }}>USD / 30 Ngày</span>
-                  </div>
-                  <span style={{ fontSize: '11px', color: '#A0AEC0', display: 'block', marginTop: '2px' }}>
-                    {selectedNetwork === 'eth' ? '≈ 2.00 USDT (Tối thiểu $2 mạng ETH ERC-20)' : '≈ 1.00 USDT (Kích hoạt 30 ngày)'}
+                  <span style={{ fontSize: '10px', color: '#CBB193', fontWeight: '800', background: 'rgba(203, 177, 147, 0.15)', border: '1px solid #CBB193', padding: '3px 8px', borderRadius: '2px' }}>
+                    GÓI CHÍNH THỨC DUY NHẤT
                   </span>
                 </div>
 
-                {/* Option 2: Standard 15 USD */}
-                <div
-                  onClick={() => setSelectedPrice('15.00')}
-                  style={{
-                    padding: '14px 16px',
-                    background: selectedPrice === '15.00' ? 'rgba(203, 177, 147, 0.12)' : '#0E1118',
-                    border: `1px solid ${selectedPrice === '15.00' ? '#CBB193' : '#222938'}`,
-                    borderRadius: '2px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <strong style={{ fontSize: '13px', color: selectedPrice === '15.00' ? '#CBB193' : '#E9E6E7' }}>
-                      💎 Gói Pro Chuẩn
-                    </strong>
-                    <span style={{ fontSize: '10px', color: '#CBB193', fontWeight: '700', background: 'rgba(203, 177, 147, 0.15)', padding: '2px 6px', borderRadius: '2px' }}>
-                      GÓI CHÍNH THỨC
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '24px', fontWeight: '900', color: '#FFFFFF' }}>$15.00</span>
-                    <span style={{ fontSize: '11px', color: '#6B7C98' }}>USD / 30 Ngày</span>
-                  </div>
-                  <span style={{ fontSize: '11px', color: '#A0AEC0', display: 'block', marginTop: '2px' }}>
-                    ≈ 15.00 USDT (Kích hoạt 30 ngày)
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '32px', fontWeight: '900', color: '#FFFFFF', fontFamily: 'JetBrains Mono, monospace' }}>
+                    $45.00
+                  </span>
+                  <span style={{ fontSize: '13px', color: '#CBB193', fontWeight: '600' }}>
+                    USDT / 30 Ngày
                   </span>
                 </div>
 
+                <p style={{ fontSize: '12.5px', color: '#A0AEC0', margin: '0 0 12px 0', lineHeight: '1.5' }}>
+                  Toàn quyền truy cập TRADEWH, full hệ thống tín hiệu chỉ báo chuyên sâu (KSI, KCS, Diamond, MA30, MA200, PIVOT, KCB, Màu nến) và tính năng phân tích đa màn hình.
+                </p>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', fontSize: '11.5px', color: '#E9E6E7' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>30 ngày truy cập không giới hạn</span></span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>Toàn bộ thị trường Vàng, Dầu, Crypto, Forex, Cổ phiếu</span></span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>Tự động kích hoạt ngay sau khi chuyển khoản</span></span>
+                </div>
               </div>
             </div>
 
-            {/* Network Selection (Cố định 2 mạng BSC và ETH) */}
+            {/* Network Selection (Tối giản 2 mạng BSC và ETH) */}
             <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                2. Chọn Mạng Blockchain (USDT):
+                Chọn Mạng Blockchain (USDT):
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
                 
                 {/* Network 1: BSC (BEP-20) */}
                 <div
-                  onClick={() => {
-                    setSelectedNetwork('bsc');
-                    if (selectedPrice === '2.00') setSelectedPrice('1.00');
-                  }}
+                  onClick={() => setSelectedNetwork('bsc')}
                   style={{
-                    padding: '16px',
+                    padding: '12px 16px',
                     background: selectedNetwork === 'bsc' ? 'rgba(240, 185, 11, 0.08)' : '#0E1118',
                     border: `1.5px solid ${selectedNetwork === 'bsc' ? '#F0B90B' : '#222938'}`,
                     borderRadius: '2px',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
-                    position: 'relative'
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '18px' }}>🟡</span>
-                      <strong style={{ fontSize: '14px', color: selectedNetwork === 'bsc' ? '#F0B90B' : '#E9E6E7' }}>
-                        BNB Smart Chain (BSC)
-                      </strong>
-                    </div>
-                    <span style={{
-                      fontSize: '10px',
-                      fontWeight: '800',
-                      color: '#0B0E14',
-                      background: '#F0B90B',
-                      padding: '2px 6px',
-                      borderRadius: '2px'
-                    }}>
-                      BEP-20
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '16px' }}>🟡</span>
+                    <strong style={{ fontSize: '13px', color: selectedNetwork === 'bsc' ? '#F0B90B' : '#E9E6E7' }}>
+                      BNB Smart Chain
+                    </strong>
                   </div>
-                  <p style={{ fontSize: '12px', color: '#A0AEC0', margin: '0 0 6px 0', lineHeight: '1.4' }}>
-                    Phí gas cực rẻ (~$0.05) • Xác nhận nhanh trong 3 giây.
-                  </p>
-                  <div style={{ fontSize: '11px', color: '#4ADE80', fontWeight: '600' }}>
-                    ⚡ Khuyên dùng (Phù hợp test $1.00 USDT)
-                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: '800',
+                    color: selectedNetwork === 'bsc' ? '#0B0E14' : '#F0B90B',
+                    background: selectedNetwork === 'bsc' ? '#F0B90B' : 'rgba(240, 185, 11, 0.12)',
+                    padding: '2px 6px',
+                    borderRadius: '2px'
+                  }}>
+                    BEP-20
+                  </span>
                 </div>
 
                 {/* Network 2: Ethereum (ERC-20) */}
                 <div
-                  onClick={() => {
-                    setSelectedNetwork('eth');
-                    if (selectedPrice === '1.00') setSelectedPrice('2.00');
-                  }}
+                  onClick={() => setSelectedNetwork('eth')}
                   style={{
-                    padding: '16px',
+                    padding: '12px 16px',
                     background: selectedNetwork === 'eth' ? 'rgba(98, 126, 234, 0.08)' : '#0E1118',
                     border: `1.5px solid ${selectedNetwork === 'eth' ? '#627EEA' : '#222938'}`,
                     borderRadius: '2px',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
-                    position: 'relative'
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '18px' }}>🔵</span>
-                      <strong style={{ fontSize: '14px', color: selectedNetwork === 'eth' ? '#627EEA' : '#E9E6E7' }}>
-                        Ethereum Mainnet
-                      </strong>
-                    </div>
-                    <span style={{
-                      fontSize: '10px',
-                      fontWeight: '800',
-                      color: '#FFFFFF',
-                      background: '#627EEA',
-                      padding: '2px 6px',
-                      borderRadius: '2px'
-                    }}>
-                      ERC-20
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '16px' }}>🔵</span>
+                    <strong style={{ fontSize: '13px', color: selectedNetwork === 'eth' ? '#627EEA' : '#E9E6E7' }}>
+                      Ethereum
+                    </strong>
                   </div>
-                  <p style={{ fontSize: '12px', color: '#A0AEC0', margin: '0 0 6px 0', lineHeight: '1.4' }}>
-                    Mạng chính thức Ethereum • Độ bảo mật tối đa.
-                  </p>
-                  <div style={{ fontSize: '11px', color: '#CBB193', fontWeight: '600' }}>
-                    Tối thiểu $2.00 USDT do phí gas ERC-20.
-                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: '800',
+                    color: selectedNetwork === 'eth' ? '#FFFFFF' : '#627EEA',
+                    background: selectedNetwork === 'eth' ? '#627EEA' : 'rgba(98, 126, 234, 0.15)',
+                    padding: '2px 6px',
+                    borderRadius: '2px'
+                  }}>
+                    ERC-20
+                  </span>
                 </div>
 
               </div>
@@ -1468,46 +1392,70 @@ function SubscriptionContent() {
               </div>
             )}
 
-            {/* Payment Action Button */}
+            {/* Minimalist Aesthetic Payment Button */}
             <button
               onClick={handleCreatePayment}
               disabled={paying}
               style={{
                 width: '100%',
-                padding: '16px 24px',
-                background: paying
-                  ? '#4A4644'
-                  : 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
-                color: '#0B0E14',
+                padding: '14px 24px',
+                background: paying ? '#1E2330' : '#CBB193',
+                color: paying ? '#787B86' : '#0B0E14',
                 border: 'none',
-                borderRadius: '2px',
+                borderRadius: '4px',
                 fontSize: '14px',
-                fontWeight: '900',
-                letterSpacing: '1px',
-                textTransform: 'uppercase',
+                fontWeight: '700',
+                letterSpacing: '0.4px',
                 cursor: paying ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '10px',
-                boxShadow: '0 4px 20px rgba(203, 177, 147, 0.2)',
-                transition: 'all 0.2s ease'
+                gap: '8px',
+                transition: 'all 0.15s ease',
+                boxShadow: paying ? 'none' : '0 2px 10px rgba(203, 177, 147, 0.15)'
+              }}
+              onMouseEnter={(e) => {
+                if (!paying) {
+                  e.currentTarget.style.background = '#dfc7ab';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!paying) {
+                  e.currentTarget.style.background = '#CBB193';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }
               }}
             >
               {paying ? (
                 <>
                   <span>🔄</span>
-                  <span>ĐANG MỞ CỔNG THANH TOÁN NOWPAYMENTS...</span>
+                  <span>Đang kết nối cổng thanh toán...</span>
                 </>
               ) : (
                 <>
-                  <span>💳</span>
-                  <span>
-                    THANH TOÁN ${selectedPrice} USDT QUA MẠNG {selectedNetwork === 'eth' ? 'ETH (ERC-20)' : 'BSC (BEP-20)'} ↗
+                  <span>Thanh toán $45 USDT</span>
+                  <span style={{ fontSize: '12.5px', fontWeight: '500', opacity: 0.75 }}>
+                    • {selectedNetwork === 'eth' ? 'ERC-20' : 'BEP-20'}
                   </span>
+                  <span style={{ fontSize: '15px', marginLeft: '4px' }}>→</span>
                 </>
               )}
             </button>
+
+            <div style={{
+              marginTop: '10px',
+              fontSize: '12px',
+              color: '#8E9BAE',
+              textAlign: 'center',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px'
+            }}>
+              <span>ℹ️</span>
+              <span>Bạn sẽ được chuyển hướng sang trang khác để thanh toán</span>
+            </div>
 
             <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', fontSize: '11px', color: '#6B7C98' }}>
               <span>🔒 Cổng bảo mật NOWPayments</span>

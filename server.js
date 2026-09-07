@@ -783,7 +783,67 @@ function getActiveAuthToken(req) {
 }
 
 /**
- * Helper to persist tokens to memory and .env file
+ * Helpers to read/write persistent system settings from PostgreSQL (Prisma SystemSetting)
+ */
+async function getSystemSetting(key) {
+  try {
+    if (prisma && prisma.systemSetting) {
+      const row = await prisma.systemSetting.findUnique({ where: { key } });
+      return row ? row.value : null;
+    }
+  } catch (err) {
+    console.warn(`[SystemSetting] ⚠️ Read error for "${key}":`, err.message);
+  }
+  return null;
+}
+
+async function saveSystemSetting(key, value) {
+  if (!key || !value) return false;
+  try {
+    if (prisma && prisma.systemSetting) {
+      await prisma.systemSetting.upsert({
+        where: { key },
+        update: { value: String(value), updated_at: new Date() },
+        create: { key, value: String(value) }
+      });
+      return true;
+    }
+  } catch (err) {
+    console.warn(`[SystemSetting] ⚠️ Save error for "${key}":`, err.message);
+  }
+  return false;
+}
+
+async function loadTokensFromDb() {
+  try {
+    const dbRefreshToken = await getSystemSetting('crazii_refresh_token');
+    if (dbRefreshToken && !dbRefreshToken.includes('PLACEHOLDER')) {
+      memoryRefreshToken = dbRefreshToken;
+      process.env.CRAZII_REFRESH_TOKEN = dbRefreshToken;
+      console.log(`[Token DB] 🔑 Loaded Crazii Refresh Token from Database!`);
+    } else if (memoryRefreshToken && !memoryRefreshToken.includes('PLACEHOLDER')) {
+      // Seed database with current initial refresh token from .env
+      await saveSystemSetting('crazii_refresh_token', memoryRefreshToken);
+      console.log(`[Token DB] 💾 Seeded initial Refresh Token from .env into Database.`);
+    }
+
+    const dbAccessToken = await getSystemSetting('crazii_access_token');
+    if (dbAccessToken && !dbAccessToken.includes('PLACEHOLDER')) {
+      const jwt = decodeJwt(dbAccessToken);
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (jwt && jwt.exp && jwt.exp > nowSec + 60) {
+        memoryAccessToken = dbAccessToken;
+        process.env.CRAZII_ACCESS_TOKEN = dbAccessToken;
+        console.log(`[Token DB] 🔑 Loaded valid Access Token from Database (expires in ${jwt.exp - nowSec}s).`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[Token DB] ⚠️ Failed to load tokens from Database:`, err.message);
+  }
+}
+
+/**
+ * Helper to persist tokens to memory, .env file, and PostgreSQL Database
  */
 function updateEnvTokens({ authToken, refreshToken }) {
   try {
@@ -796,6 +856,9 @@ function updateEnvTokens({ authToken, refreshToken }) {
       process.env.CRAZII_ACCESS_TOKEN = cleanAuth;
       delete process.env.CRAZII_AUTH_TOKEN;
       delete process.env.AUTH_TOKEN;
+
+      // Persist to Database asynchronously
+      saveSystemSetting('crazii_access_token', cleanAuth).catch(() => {});
 
       if (/^CRAZII_ACCESS_TOKEN=/m.test(content)) {
         content = content.replace(/^CRAZII_ACCESS_TOKEN=.*$/m, `CRAZII_ACCESS_TOKEN=${cleanAuth}`);
@@ -811,6 +874,11 @@ function updateEnvTokens({ authToken, refreshToken }) {
       memoryRefreshToken = cleanRefresh;
       process.env.CRAZII_REFRESH_TOKEN = cleanRefresh;
       delete process.env.REFRESH_TOKEN;
+
+      // Persist to Database asynchronously
+      saveSystemSetting('crazii_refresh_token', cleanRefresh).then(() => {
+        console.log(`[Token DB] 💾 Successfully saved new Refresh Token to Database!`);
+      }).catch(() => {});
 
       if (/^CRAZII_REFRESH_TOKEN=/m.test(content)) {
         content = content.replace(/^CRAZII_REFRESH_TOKEN=.*$/m, `CRAZII_REFRESH_TOKEN=${cleanRefresh}`);
@@ -2065,7 +2133,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     const userId = user.id || user.sub;
     const orderId = `SUB_${userId}_${Date.now()}`;
     const baseUrl = getAppBaseUrl(req);
-    const { amount = "1.00", currency = "usd", network = "bsc", pay_currency } = req.body || {};
+    const { amount = "45.00", currency = "usd", network = "bsc", pay_currency } = req.body || {};
 
     // Map network to NOWPayments currency tickers (usdtbsc = BSC/BEP20, usdterc20 = Ethereum/ERC20)
     let selectedPayCurrency = 'usdtbsc';
@@ -2084,17 +2152,13 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     // 1. Try NOWPayments Direct Invoice-Payment Flow (/v1/invoice + /v1/invoice-payment)
     if (NOWPAYMENTS_API_KEY) {
       try {
-        let numAmount = parseFloat(amount) || 1.00;
-        // ETH ERC-20 has a network minimal requirement of ~1.16 USDT
-        if (selectedPayCurrency === 'usdterc20' && numAmount < 2.00) {
-          numAmount = 2.00;
-        }
+        let numAmount = parseFloat(amount) || 45.00;
 
         const invPayload = {
           price_amount: numAmount,
           price_currency: currency.toLowerCase(),
           order_id: orderId,
-          order_description: `TRADEWH Pro Tier - 1 Month ($${numAmount}) [USDT ${networkName}]`,
+          order_description: `Gói TRADEWH Pro (30 Ngày) - $${numAmount.toFixed(2)} [USDT ${networkName}]`,
           ipn_callback_url: `${baseUrl}/api/payment/webhook`,
           success_url: `${baseUrl}/subscription?status=success&order_id=${orderId}`,
           cancel_url: `${baseUrl}/subscription?status=cancel&order_id=${orderId}`
@@ -2716,7 +2780,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     const result = await processSuccessfulPayment({
       orderId,
       paymentStatus: 'finished',
-      priceAmount: "15.00",
+      priceAmount: "45.00",
       payCurrency: "USDT",
       source: 'Admin / Dev Simulation',
       req
@@ -2727,7 +2791,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         success: true,
         message: result.alreadyProcessed
           ? `Đơn hàng ${orderId} đã được kích hoạt trước đó.`
-          : `Đã mô phỏng thanh toán thành công cho đơn hàng ${orderId}! Gói cước đã được kích hoạt +30 ngày qua Transaction.`,
+          : `Đã mô phỏng thanh toán thành công cho đơn hàng ${orderId}! Gói TRADEWH Pro (30 Ngày) đã được kích hoạt +30 ngày qua Transaction.`,
         expiry: result.newExpiry,
         alreadyProcessed: Boolean(result.alreadyProcessed)
       });
@@ -2815,7 +2879,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           subscriptionExpiry: result.newExpiry,
           message: result.alreadyProcessed
             ? 'Gói cước đã được kích hoạt trước đó.'
-            : '🎉 Gói cước Pro đã được kích hoạt thành công (+30 ngày)!'
+            : '🎉 Gói TRADEWH Pro (30 Ngày) đã được kích hoạt thành công (+30 ngày)!'
         });
       }
 
@@ -3262,6 +3326,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       activeChannels.forEach(channel => {
         targetSocket.emit('subscribe', channel);
       });
+      targetSocket.emit('subscribe', 'price');
       io.emit('upstream_status', { connected: true, timestamp: Date.now() });
     });
 
@@ -3277,6 +3342,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         activeChannels.forEach(channel => {
           targetSocket.emit('subscribe', channel);
         });
+        targetSocket.emit('subscribe', 'price');
         io.emit('upstream_status', { connected: true, timestamp: Date.now() });
       });
 
@@ -3532,16 +3598,22 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       timestamp: Date.now()
     });
 
+    // Automatically register client for live price ticks and ensure upstream relay is active
+    addClientSubscription('price', clientSocket.id);
+    if (!targetSocket || !targetSocket.connected) {
+      connectUpstreamWebSocket();
+    } else {
+      targetSocket.emit('subscribe', 'price');
+    }
+
     clientSocket.on('subscribe', (channel) => {
       if (channel && typeof channel === 'string') {
         const cleanChan = channel.trim();
-        if (cleanChan && cleanChan.toLowerCase() !== 'price') {
-          const isFirstSub = addClientSubscription(cleanChan, clientSocket.id);
-          if (!targetSocket || !targetSocket.connected) {
-            connectUpstreamWebSocket();
-          } else if (isFirstSub) {
-            targetSocket.emit('subscribe', cleanChan);
-          }
+        const isFirstSub = addClientSubscription(cleanChan, clientSocket.id);
+        if (!targetSocket || !targetSocket.connected) {
+          connectUpstreamWebSocket();
+        } else if (isFirstSub || cleanChan.toLowerCase() === 'price') {
+          targetSocket.emit('subscribe', cleanChan);
         }
       }
     });
@@ -3586,8 +3658,9 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     return handle(req, res);
   });
 
-  // Startup Token Verification (Does NOT connect upstream WS until user clicks an asset)
+  // Startup Token Verification (Loads from PostgreSQL DB first, then verifies & refreshes if needed)
   (async () => {
+    await loadTokensFromDb();
     const auth = getActiveAuthToken();
     const jwt = decodeJwt(auth);
     const nowSec = Math.floor(Date.now() / 1000);
