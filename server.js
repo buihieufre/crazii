@@ -1867,6 +1867,74 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       }
     }
 
+    // Proactive Auto-Check: If user is not active, check if they have any pending orders from the last 24h
+    if (!isActive && !isAdmin && NOWPAYMENTS_API_KEY && prisma) {
+      try {
+        const pendingOrder = await prisma.subscriptionOrder.findFirst({
+          where: {
+            OR: [
+              { user_id: dbUser.id || dbUser.sub },
+              { email: dbUser.email }
+            ],
+            status: { in: ['pending', 'waiting'] },
+            created_at: { gte: new Date(Date.now() - 24 * 3600 * 1000) }
+          },
+          orderBy: { created_at: 'desc' }
+        });
+
+        if (pendingOrder && pendingOrder.cryptomus_uuid) {
+          const checkRes = await fetch(`https://api.nowpayments.io/v1/payment/${pendingOrder.cryptomus_uuid}`, {
+            method: 'GET',
+            headers: { 'x-api-key': NOWPAYMENTS_API_KEY }
+          });
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            const remoteStatus = checkData?.payment_status;
+            if (remoteStatus === 'finished' || remoteStatus === 'confirmed' || remoteStatus === 'sending') {
+              console.log(`[Auto-Reconciliation] 🚀 Found confirmed pending payment [${pendingOrder.cryptomus_uuid}] for ${dbUser.email}! Activating now...`);
+              await processSuccessfulPayment({
+                orderId: pendingOrder.order_id,
+                paymentId: pendingOrder.cryptomus_uuid,
+                paymentStatus: remoteStatus,
+                actuallyPaid: checkData.actually_paid,
+                priceAmount: checkData.price_amount,
+                payCurrency: checkData.pay_currency,
+                source: 'User Subscription Auto-Reconciliation',
+                req
+              });
+
+              // Re-fetch fresh user status after activation
+              const freshUser = (await findUserByEmail(user.email)) || (await findUserById(user.id || user.sub));
+              if (freshUser) {
+                const freshActive = isUserSubscriptionActive(freshUser);
+                if (freshActive) {
+                  const freshExpiry = freshUser.subscriptionExpiry || freshUser.subscription_expiry;
+                  const freshExpTime = freshExpiry ? new Date(freshExpiry).getTime() : 0;
+                  const freshDiff = Math.max(0, Math.ceil((freshExpTime - Date.now()) / (1000 * 60 * 60 * 24)));
+                  return res.json({
+                    success: true,
+                    subscriptionStatus: true,
+                    subscriptionExpiry: freshExpiry,
+                    daysLeft: freshDiff,
+                    isAdmin: false,
+                    isExpired: false,
+                    isNotActivated: false,
+                    subscriptionState: 'active',
+                    role: freshUser.role || 'user',
+                    email: freshUser.email,
+                    name: freshUser.name,
+                    autoActivated: true
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (reconErr) {
+        console.warn('[Auto-Reconciliation Notice]', reconErr.message);
+      }
+    }
+
     const subscriptionState = isAdmin ? 'admin' : (isActive ? 'active' : (isExpired ? 'expired' : 'not_activated'));
 
     return res.json({

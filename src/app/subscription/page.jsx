@@ -179,8 +179,15 @@ function SubscriptionContent() {
 
   // Handle auto query check if returned from NOWPayments payment gateway
   useEffect(() => {
-    if (queryStatus === 'success') {
-      const targetOrderId = queryOrderId || queryNPId;
+    let targetOrderId = queryOrderId || queryNPId || (searchParams ? searchParams.get('paymentId') : null) || (searchParams ? searchParams.get('payment_id') : null);
+    if (!targetOrderId) {
+      try {
+        const savedOrderId = localStorage.getItem('crazii_last_payment_order_id');
+        if (savedOrderId) targetOrderId = savedOrderId;
+      } catch (e) {}
+    }
+
+    if (queryStatus === 'success' || targetOrderId) {
       if (targetOrderId) {
         setMessage({
           type: 'info',
@@ -195,6 +202,7 @@ function SubscriptionContent() {
           .then(data => {
             if (data.success && (data.activated || data.order?.status === 'finished' || data.order?.status === 'confirmed')) {
               try {
+                localStorage.removeItem('crazii_last_payment_order_id');
                 const stored = localStorage.getItem('crazii_user');
                 if (stored) {
                   const parsed = JSON.parse(stored);
@@ -207,6 +215,15 @@ function SubscriptionContent() {
                   localStorage.setItem('crazii_user', JSON.stringify(parsed));
                 }
               } catch (e) {}
+
+              // If opened in child popup/tab, redirect parent and close self
+              if (typeof window !== 'undefined' && window.opener && !window.opener.closed) {
+                try {
+                  window.opener.location.href = '/?payment_success=1';
+                  window.close();
+                  return;
+                } catch (e) {}
+              }
 
               setMessage({
                 type: 'success',
@@ -399,23 +416,28 @@ function SubscriptionContent() {
       const data = await res.json();
       if (data.success && (data.invoiceUrl || data.paymentUrl)) {
         const url = data.invoiceUrl || data.paymentUrl;
+        if (data.orderId) {
+          try {
+            localStorage.setItem('crazii_last_payment_order_id', data.orderId);
+          } catch (e) {}
+        }
         setPaymentInfo({
           ...data,
           networkName,
           selectedPrice: data.amount || effectivePrice
         });
-        window.open(url, '_blank', 'noopener,noreferrer');
+        
         setMessage({
           type: 'info',
-          text: `Đã mở trang thanh toán USDT mạng ${networkName} ($${data.amount || effectivePrice}). Sau khi hoàn tất chuyển khoản, gói cước sẽ tự động kích hoạt +30 ngày!`
+          text: `Đang chuyển sang cổng thanh toán NOWPayments USDT (${networkName}). Sau khi chuyển khoản xong, gói cước sẽ tự động kích hoạt +30 ngày!`
         });
 
-        // Polling status every 4 seconds
+        // Polling status every 4 seconds (up to 20 minutes)
         let count = 0;
         const interval = setInterval(async () => {
           count++;
           setPollCount(count);
-          if (count > 45) {
+          if (count > 300) {
             clearInterval(interval);
             return;
           }
@@ -429,6 +451,7 @@ function SubscriptionContent() {
               if (statusData.activated || statusData.order?.status === 'finished' || statusData.order?.status === 'confirmed') {
                 clearInterval(interval);
                 try {
+                  localStorage.removeItem('crazii_last_payment_order_id');
                   const stored = localStorage.getItem('crazii_user');
                   if (stored) {
                     const parsed = JSON.parse(stored);
@@ -458,6 +481,11 @@ function SubscriptionContent() {
 
           await fetchSubscriptionData();
         }, 4000);
+
+        // Chuyển hướng thanh toán trong cùng tab để tránh duplicate tab
+        setTimeout(() => {
+          window.location.href = url;
+        }, 300);
       } else {
         setMessage({
           type: 'error',
