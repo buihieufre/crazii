@@ -101,6 +101,17 @@ function SubscriptionContent() {
       const data = await res.json();
       if (data.success) {
         setSubData(data);
+        if (data.isActive || data.isAdmin) {
+          try {
+            localStorage.removeItem('crazii_last_payment_order_id');
+          } catch (e) {}
+          setMessage(prev => {
+            if (prev?.type === 'info' && (prev?.text?.includes('Đang chờ nhận tiền') || prev?.text?.includes('xác nhận giao dịch'))) {
+              return null;
+            }
+            return prev;
+          });
+        }
         try {
           const raw = localStorage.getItem('crazii_user');
           if (raw) {
@@ -182,6 +193,20 @@ function SubscriptionContent() {
 
   // Handle auto query check if returned from NOWPayments payment gateway
   useEffect(() => {
+    // If account is already active or admin, clear old pending orders from localStorage and exit
+    if (subData?.isActive || subData?.isAdmin) {
+      try {
+        localStorage.removeItem('crazii_last_payment_order_id');
+      } catch (e) {}
+      setMessage(prev => {
+        if (prev?.type === 'info' && (prev?.text?.includes('Đang chờ nhận tiền') || prev?.text?.includes('xác nhận giao dịch'))) {
+          return null;
+        }
+        return prev;
+      });
+      return;
+    }
+
     let targetOrderId = queryOrderId || queryNPId || (searchParams ? searchParams.get('paymentId') : null) || (searchParams ? searchParams.get('payment_id') : null);
     if (!targetOrderId) {
       try {
@@ -231,10 +256,15 @@ function SubscriptionContent() {
                 router.push('/');
               }, 1800);
             } else {
-              setMessage({
-                type: 'info',
-                text: data.message || 'Giao dịch đang chờ xác nhận từ mạng blockchain. Vui lòng đợi trong giây lát...'
-              });
+              if (subData?.isActive || subData?.isAdmin) {
+                try { localStorage.removeItem('crazii_last_payment_order_id'); } catch (e) {}
+                setMessage(null);
+              } else {
+                setMessage({
+                  type: 'info',
+                  text: data.message || 'Giao dịch đang chờ xác nhận từ mạng blockchain. Vui lòng đợi trong giây lát...'
+                });
+              }
               fetchSubscriptionData();
             }
           })
@@ -245,12 +275,14 @@ function SubscriptionContent() {
         fetchSubscriptionData();
       }
     } else if (queryStatus === 'cancel') {
-      setMessage({
-        type: 'info',
-        text: 'Đơn hàng thanh toán đã bị tạm dừng hoặc hủy. Bạn có thể tiến hành tạo lại bất kỳ lúc nào.'
-      });
+      if (!subData?.isActive && !subData?.isAdmin) {
+        setMessage({
+          type: 'info',
+          text: 'Đơn hàng thanh toán đã bị tạm dừng hoặc hủy. Bạn có thể tiến hành tạo lại bất kỳ lúc nào.'
+        });
+      }
     }
-  }, [queryStatus, queryOrderId, queryNPId]);
+  }, [queryStatus, queryOrderId, queryNPId, subData?.isActive, subData?.isAdmin]);
 
 
   // Copy to clipboard helper
@@ -616,6 +648,21 @@ function SubscriptionContent() {
   const daysLeft = subData?.daysLeft || 0;
   const isAdmin = subData?.isAdmin;
 
+  // Automatically dismiss lingering pending payment messages and clear pending order for active subscribers or admins
+  useEffect(() => {
+    if (isActive || isAdmin) {
+      try {
+        localStorage.removeItem('crazii_last_payment_order_id');
+      } catch (e) {}
+      setMessage(prev => {
+        if (prev?.type === 'info' && (prev?.text?.includes('Đang chờ nhận tiền') || prev?.text?.includes('xác nhận giao dịch'))) {
+          return null;
+        }
+        return prev;
+      });
+    }
+  }, [isActive, isAdmin]);
+
   const expiryRaw = subData?.subscriptionExpiry || user?.subscription_expiry || user?.subscriptionExpiry;
   const expiryTime = expiryRaw ? new Date(expiryRaw).getTime() : 0;
   const isExpired = Boolean(!isAdmin && !isActive && (subData?.isExpired || (expiryTime > 0 && expiryTime <= Date.now())));
@@ -760,7 +807,7 @@ function SubscriptionContent() {
       <main style={{ width: '100%', maxWidth: '1040px', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         
         {/* Global Notification Banner */}
-        {message && (
+        {message && (!isActive || message.type !== 'info' || (!message.text.includes('Đang chờ nhận tiền') && !message.text.includes('xác nhận giao dịch'))) && (
           <div style={{
             width: '100%',
             maxWidth: '820px',
