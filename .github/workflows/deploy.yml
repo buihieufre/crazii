@@ -22,42 +22,59 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script_stop: true
           script: |
-            # Nạp biến môi trường Node/NPM/PM2 (đặc biệt hữu ích nếu dùng NVM)
+            # 1. Nạp biến môi trường Node & NPM an toàn (không gây exit 1 nếu không có NVM)
             export PATH=$PATH:/usr/local/bin:/usr/bin:/bin
-            [ -s "$HOME/.nvm/nvm.sh" ] && \. "$HOME/.nvm/nvm.sh"
-            [ -s "$HOME/.bashrc" ] && \. "$HOME/.bashrc"
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+              \. "$HOME/.nvm/nvm.sh"
+            fi
 
             echo "🚀 [Deploy] Bắt đầu cập nhật dự án trên VPS..."
-            
-            # Di chuyển vào thư mục dự án trên VPS
-            cd /home/crazii
-            
-            # Cập nhật code từ nhánh newdeploy
-            echo "📥 [Git] Đang kéo code mới nhất từ nhánh newdeploy..."
+            echo "👤 User hiện tại: $(whoami)"
+            echo "📍 Thư mục gốc: $(pwd)"
+
+            # 2. Định vị thư mục dự án
+            if [ -d "/home/crazii" ]; then
+              cd /home/crazii
+            elif [ -d "$HOME/crazii" ]; then
+              cd "$HOME/crazii"
+            else
+              echo "❌ Không tìm thấy thư mục crazii tại /home/crazii hoặc $HOME/crazii"
+              ls -la /home 2>/dev/null || true
+              exit 1
+            fi
+
+            echo "📂 Đang làm việc tại: $(pwd)"
+
+            # 3. Kéo code mới nhất từ nhánh newdeploy
+            echo "📥 [Git] Cập nhật code từ nhánh newdeploy..."
+            git stash || true
             git fetch origin newdeploy
             git checkout newdeploy
             git pull origin newdeploy
 
-            # Cài đặt dependencies (nếu có package mới)
-            echo "📦 [NPM] Cài đặt / cập nhật dependencies..."
+            # 4. Cài đặt dependencies
+            echo "📦 [NPM] Cài đặt dependencies..."
             npm install
 
-            # Tạo Prisma Client
+            # 5. Đồng bộ Prisma Client
             echo "🗄️ [Prisma] Đồng bộ Prisma Client..."
             npx prisma generate || true
 
-            # Build bản Production tối ưu cho Next.js
-            echo "🏗️ [Build] Đang build ứng dụng Next.js cho Production..."
+            # 6. Build Next.js cho Production
+            echo "🏗️ [Build] Đang build ứng dụng Next.js..."
             npm run build
 
-            # Khởi động lại tiến trình server bằng PM2
-            echo "⚡ [Server] Khởi động lại tiến trình Node.js bằng PM2..."
+            # 7. Khởi động lại server bằng PM2
+            echo "⚡ [Server] Khởi động lại bằng PM2..."
             if command -v pm2 > /dev/null 2>&1; then
               pm2 restart crazii || pm2 restart all || pm2 start server.js --name "crazii" --env production
               pm2 save
+            elif [ -f "./node_modules/.bin/pm2" ]; then
+              ./node_modules/.bin/pm2 restart crazii || ./node_modules/.bin/pm2 restart all
             else
-              echo "⚠️ PM2 chưa được cài đặt toàn cục. Khởi động trực tiếp..."
+              echo "⚠️ PM2 chưa được cài đặt. Khởi động với Node..."
+              pkill -f "node server.js" || true
               nohup node server.js > server.log 2>&1 &
             fi
 
-            echo "✅ [Deploy] Cập nhật và triển khai thành công lên VPS!"
+            echo "✅ [Deploy] Hoàn tất triển khai thành công lên VPS!"
