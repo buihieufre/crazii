@@ -423,8 +423,8 @@ export default function Header({
             </Link>
           )}
 
-          {/* Admin Dashboard Direct Button - Bỏ phân cấp role admin, hiển thị cho mọi user */}
-          {effectiveUser && (
+          {/* Admin Dashboard Direct Button - CHỈ QUẢN TRỊ VIÊN MỚI THẤY */}
+          {isAdmin && (
             <Link
               href="/admin"
               className="btn subscription-btn-highlight"
@@ -627,7 +627,7 @@ export default function Header({
 
                   {/* Navigation Links */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {effectiveUser && (
+                    {isAdmin && (
                       <Link
                         href="/admin"
                         onClick={() => setIsUserMenuOpen(false)}
@@ -864,33 +864,40 @@ export default function Header({
 
 
           {/* Group 5: Subscription & Admin Panel */}
-          <div className="mobile-drawer-group">
-            <div className="mobile-group-title">
-              <span>👑</span>
-              <span>QUẢN TRỊ VIÊN & GÓI CƯỚC</span>
+          {isAdmin ? (
+            <div className="mobile-drawer-group">
+              <div className="mobile-group-title">
+                <span>👑</span>
+                <span>QUẢN TRỊ VIÊN</span>
+              </div>
+              
+              <Link
+                href="/admin"
+                className="mobile-admin-btn"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                style={{
+                  textDecoration: 'none',
+                  background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.22) 0%, rgba(171, 151, 140, 0.1) 100%)',
+                  borderColor: 'rgba(203, 177, 147, 0.5)',
+                  color: '#CBB193',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: '700',
+                  marginBottom: '10px'
+                }}
+              >
+                <span>👑</span>
+                <span>Bảng Quản Trị Hệ Thống (Admin)</span>
+              </Link>
             </div>
-            
-            {/* Direct Admin Dashboard link for all users */}
-            <Link
-              href="/admin"
-              className="mobile-admin-btn"
-              onClick={() => setIsMobileDrawerOpen(false)}
-              style={{
-                textDecoration: 'none',
-                background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.22) 0%, rgba(171, 151, 140, 0.1) 100%)',
-                borderColor: 'rgba(203, 177, 147, 0.5)',
-                color: '#CBB193',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                fontWeight: '700',
-                marginBottom: '10px'
-              }}
-            >
-              <span>👑</span>
-              <span>Bảng Quản Trị Hệ Thống (Admin)</span>
-            </Link>
+          ) : (
+            <div className="mobile-drawer-group">
+              <div className="mobile-group-title">
+                <span>💎</span>
+                <span>GÓI THÀNH VIÊN PRO</span>
+              </div>
 
             {isSubscribed ? (
               <div
@@ -953,6 +960,7 @@ export default function Header({
               </Link>
             )}
           </div>
+        )}
 
           {/* Group 6: Logout Button (Elevated with bottom padding for mobile safe area) */}
           <div className="mobile-logout-wrapper">

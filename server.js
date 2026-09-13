@@ -1,4 +1,17 @@
 require('dotenv').config();
+
+// Ensure DATABASE_URL has ?pgbouncer=true before Prisma query engine starts
+if (process.env.DATABASE_URL) {
+  let dbUrl = process.env.DATABASE_URL.trim();
+  if ((dbUrl.startsWith('"') && dbUrl.endsWith('"')) || (dbUrl.startsWith("'") && dbUrl.endsWith("'"))) {
+    dbUrl = dbUrl.slice(1, -1).trim();
+  }
+  if (!dbUrl.includes('pgbouncer=true')) {
+    const sep = dbUrl.includes('?') ? '&' : '?';
+    dbUrl = `${dbUrl}${sep}pgbouncer=true`;
+  }
+  process.env.DATABASE_URL = dbUrl;
+}
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -816,10 +829,22 @@ async function getSystemSetting(key) {
   try {
     if (prisma && prisma.systemSetting) {
       const row = await prisma.systemSetting.findUnique({ where: { key } });
-      return row ? row.value : null;
+      if (row && row.value) return row.value;
     }
   } catch (err) {
     console.warn(`[SystemSetting] ⚠️ Read error for "${key}":`, err.message);
+  }
+
+  // Fallback to Supabase REST
+  if (supabaseServer) {
+    try {
+      const { data, error } = await supabaseServer
+        .from('system_settings')
+        .select('value')
+        .eq('key', key)
+        .maybeSingle();
+      if (!error && data) return data.value;
+    } catch (e) {}
   }
   return null;
 }
@@ -838,6 +863,16 @@ async function saveSystemSetting(key, value) {
   } catch (err) {
     console.warn(`[SystemSetting] ⚠️ Save error for "${key}":`, err.message);
   }
+
+  // Fallback to Supabase REST
+  if (supabaseServer) {
+    try {
+      const { error } = await supabaseServer
+        .from('system_settings')
+        .upsert({ key, value: String(value), updated_at: new Date().toISOString() });
+      return !error;
+    } catch (e) {}
+  }
   return false;
 }
 
@@ -849,9 +884,14 @@ async function loadTokensFromDb() {
       process.env.CRAZII_REFRESH_TOKEN = dbRefreshToken;
       console.log(`[Token DB] 🔑 Loaded Crazii Refresh Token from Database!`);
     } else if (memoryRefreshToken && !memoryRefreshToken.includes('PLACEHOLDER')) {
-      // Seed database with current initial refresh token from .env
-      await saveSystemSetting('crazii_refresh_token', memoryRefreshToken);
-      console.log(`[Token DB] 💾 Seeded initial Refresh Token from .env into Database.`);
+      const jwt = decodeJwt(memoryRefreshToken);
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (jwt && jwt.exp && jwt.exp > nowSec) {
+        await saveSystemSetting('crazii_refresh_token', memoryRefreshToken);
+        console.log(`[Token DB] 💾 Seeded valid Refresh Token from .env into Database.`);
+      } else {
+        console.log(`[Token DB] ⚠️ Refresh Token in .env is expired (${jwt?.exp ? jwt.exp - nowSec : 0}s). Skipped seeding to prevent database pollution.`);
+      }
     }
 
     const dbAccessToken = await getSystemSetting('crazii_access_token');
@@ -3131,9 +3171,19 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   // NEXT-SHADCN ADMIN DASHBOARD REST APIs
   // =========================================================================
 
-  // Middleware: Cho phép truy cập Quản Trị (Bỏ phân cấp role admin)
+  // Middleware: CHỈ QUẢN TRỊ VIÊN mới được truy cập các API Quản Trị
   function checkIsAdmin(req, res, next) {
-    // Bỏ phân cấp role admin: cho phép tất cả các tài khoản đã xác thực truy cập quản trị
+    const requester = req.user;
+    const adminKey = req.headers['x-admin-key'];
+    const isAdmin = isUserAdmin(requester) || adminKey === ADMIN_SECRET_KEY;
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN_NOT_ADMIN',
+        message: 'Bạn không có quyền truy cập chức năng Quản Trị Viên này.'
+      });
+    }
     next();
   }
 

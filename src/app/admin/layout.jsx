@@ -25,7 +25,7 @@ export default function AdminLayout({ children }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Authentication guard: Cho phép mọi tài khoản đã đăng nhập truy cập quản trị (Bỏ phân cấp role admin)
+  // Authentication guard: CHỈ QUẢN TRỊ VIÊN mới được truy cập Bảng Quản Trị
   useEffect(() => {
     async function checkAuth() {
       try {
@@ -35,15 +35,30 @@ export default function AdminLayout({ children }) {
           return;
         }
 
-        setIsAdmin(true);
+        let userObj = null;
         const rawUser = localStorage.getItem('crazii_user');
         if (rawUser) {
-          try { setAdminUser(JSON.parse(rawUser)); } catch (e) {}
-        } else {
-          setAdminUser({ email: 'admin@tradewh.com', name: 'Quản Trị Viên' });
+          try { userObj = JSON.parse(rawUser); } catch (e) {}
         }
-      } catch (err) {
+
+        const isKnownAdmin = Boolean(
+          userObj && (
+            ['dhieu9b@gmail.com', 'buidinhhieu9b@gmail.com'].includes((userObj.email || '').toLowerCase().trim()) ||
+            (userObj.role || '').toLowerCase() === 'admin' ||
+            userObj.isAdmin === true
+          )
+        );
+
+        if (!isKnownAdmin) {
+          // User thông thường không có quyền truy cập quản trị -> điều hướng về trang Gói Cước
+          router.push('/subscription');
+          return;
+        }
+
         setIsAdmin(true);
+        setAdminUser(userObj || { email: 'admin@tradewh.com', name: 'Quản Trị Viên' });
+      } catch (err) {
+        router.push('/subscription');
       } finally {
         setLoading(false);
       }
