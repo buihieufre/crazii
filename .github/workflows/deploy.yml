@@ -1,0 +1,63 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - newdeploy
+  workflow_dispatch: # Cho phép bấm nút "Run workflow" thủ công trên GitHub
+
+jobs:
+  deploy:
+    name: Deploy Application to VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into VPS and Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }} # Tự động dùng mật khẩu nếu không dùng SSH Key
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            # Nạp biến môi trường Node/NPM/PM2 (đặc biệt hữu ích nếu dùng NVM)
+            export PATH=$PATH:/usr/local/bin:/usr/bin:/bin
+            [ -s "$HOME/.nvm/nvm.sh" ] && \. "$HOME/.nvm/nvm.sh"
+            [ -s "$HOME/.bashrc" ] && \. "$HOME/.bashrc"
+
+            echo "🚀 [Deploy] Bắt đầu cập nhật dự án trên VPS..."
+            
+            # Di chuyển vào thư mục dự án trên VPS
+            cd /home/crazii
+            
+            # Cập nhật code từ nhánh newdeploy
+            echo "📥 [Git] Đang kéo code mới nhất từ nhánh newdeploy..."
+            git fetch origin newdeploy
+            git checkout newdeploy
+            git pull origin newdeploy
+
+            # Cài đặt dependencies (nếu có package mới)
+            echo "📦 [NPM] Cài đặt / cập nhật dependencies..."
+            npm install
+
+            # Tạo Prisma Client
+            echo "🗄️ [Prisma] Đồng bộ Prisma Client..."
+            npx prisma generate || true
+
+            # Build bản Production tối ưu cho Next.js
+            echo "🏗️ [Build] Đang build ứng dụng Next.js cho Production..."
+            npm run build
+
+            # Khởi động lại tiến trình server bằng PM2
+            echo "⚡ [Server] Khởi động lại tiến trình Node.js bằng PM2..."
+            if command -v pm2 > /dev/null 2>&1; then
+              pm2 restart crazii || pm2 restart all || pm2 start server.js --name "crazii" --env production
+              pm2 save
+            else
+              echo "⚠️ PM2 chưa được cài đặt toàn cục. Khởi động trực tiếp..."
+              nohup node server.js > server.log 2>&1 &
+            fi
+
+            echo "✅ [Deploy] Cập nhật và triển khai thành công lên VPS!"
