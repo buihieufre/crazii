@@ -2,8 +2,22 @@ import './globals.css';
 
 export const metadata = {
   metadataBase: new URL('https://tradewh.work'),
-  title: 'TRADEWH',
-  description: 'Next.js Pro Trading Terminal with TradingView Lightweight Charts and WebSocket streaming',
+  title: 'TRADEWH - Biểu Đồ & Tín Hiệu Giao Dịch',
+  description: 'Nền tảng biểu đồ trực tuyến và tín hiệu giao dịch thời gian thực cho Vàng, Crypto & Forex.',
+  keywords: ['TRADEWH', 'biểu đồ vàng', 'XAUUSD', 'tín hiệu giao dịch', 'phân tích kỹ thuật', 'crypto', 'forex'],
+  openGraph: {
+    title: 'TRADEWH - Biểu Đồ & Tín Hiệu Giao Dịch',
+    description: 'Nền tảng biểu đồ trực tuyến và tín hiệu giao dịch thời gian thực cho Vàng, Crypto & Forex.',
+    url: 'https://tradewh.work',
+    siteName: 'TRADEWH',
+    locale: 'vi_VN',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'TRADEWH - Biểu Đồ & Tín Hiệu Giao Dịch',
+    description: 'Nền tảng biểu đồ trực tuyến và tín hiệu giao dịch thời gian thực cho Vàng, Crypto & Forex.',
+  },
   icons: {
     icon: [
       { url: '/favicon.svg', type: 'image/svg+xml' },
