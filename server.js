@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -11,7 +12,6 @@ const { io: ioClient } = require('socket.io-client');
 const next = require('next');
 const { telegramSignalBot, TRADE_STATUS } = require('./src/lib/telegram-signal-bot');
 const nodemailer = require('nodemailer');
-require('dotenv').config();
 
 // Global JSON serialization fix for Prisma BigInt fields
 BigInt.prototype.toJSON = function () {
@@ -86,14 +86,19 @@ const ADMIN_EMAILS = [
   (process.env.ADMIN_EMAIL || '').toLowerCase().trim()
 ].filter(Boolean);
 
-function isUserAdmin(user) {
+function isUserDisabled(user) {
   if (!user) return false;
+  return user.role === 'disabled' || user.isDisabled === true;
+}
+
+function isUserAdmin(user) {
+  if (!user || user.role === 'disabled' || user.isDisabled === true) return false;
   const email = (user.email || '').toLowerCase().trim();
   return ADMIN_EMAILS.includes(email) || user.role === 'admin';
 }
 
 function isUserSubscriptionActive(user) {
-  if (!user) return false;
+  if (!user || user.role === 'disabled' || user.isDisabled === true) return false;
   const expiry = user.subscriptionExpiry || user.subscription_expiry;
   if (expiry) {
     const expiryTime = new Date(expiry).getTime();
@@ -255,10 +260,11 @@ async function findUserByEmail(email) {
           email: data.email,
           name: data.name || cleanEmail.split('@')[0],
           currentDeviceId: data.current_device_id || null,
-          subscriptionStatus: Boolean(data.subscription_status),
+          subscriptionStatus: data.role === 'disabled' ? false : Boolean(data.subscription_status),
           subscriptionExpiry: data.subscription_expiry ? data.subscription_expiry.toISOString() : null,
           password_hash: data.password_hash || null,
-          role: data.role || (isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user')
+          role: data.role || (isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user'),
+          isDisabled: data.role === 'disabled'
         };
       }
     }
@@ -283,10 +289,11 @@ async function findUserByEmail(email) {
           email: data.email,
           name: data.name || cleanEmail.split('@')[0],
           currentDeviceId: data.current_device_id || null,
-          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : false,
+          subscriptionStatus: data.role === 'disabled' ? false : (data.subscription_status !== undefined ? data.subscription_status : false),
           subscriptionExpiry: data.subscription_expiry || null,
           password_hash: data.password_hash || null,
-          role: data.role || (isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user')
+          role: data.role || (isUserAdmin({ email: cleanEmail }) ? 'admin' : 'user'),
+          isDisabled: data.role === 'disabled'
         };
       }
     } catch (e) {}
@@ -319,10 +326,11 @@ async function findUserById(id) {
           email: data.email,
           name: data.name || data.email?.split('@')[0],
           currentDeviceId: data.current_device_id || null,
-          subscriptionStatus: Boolean(data.subscription_status),
+          subscriptionStatus: data.role === 'disabled' ? false : Boolean(data.subscription_status),
           subscriptionExpiry: data.subscription_expiry ? data.subscription_expiry.toISOString() : null,
           password_hash: data.password_hash || null,
-          role: data.role || (isUserAdmin(data) ? 'admin' : 'user')
+          role: data.role || (isUserAdmin(data) ? 'admin' : 'user'),
+          isDisabled: data.role === 'disabled'
         };
       }
     }
@@ -349,10 +357,11 @@ async function findUserById(id) {
           email: data.email,
           name: data.name || data.email?.split('@')[0],
           currentDeviceId: data.current_device_id || null,
-          subscriptionStatus: data.subscription_status !== undefined ? data.subscription_status : false,
+          subscriptionStatus: data.role === 'disabled' ? false : (data.subscription_status !== undefined ? data.subscription_status : false),
           subscriptionExpiry: data.subscription_expiry || null,
           password_hash: data.password_hash || null,
-          role: data.role || (isUserAdmin(data) ? 'admin' : 'user')
+          role: data.role || (isUserAdmin(data) ? 'admin' : 'user'),
+          isDisabled: data.role === 'disabled'
         };
       }
     } catch (e) {}
@@ -627,6 +636,14 @@ async function requireAuthAndDevice(req, res, next) {
       });
     }
     const dbUser = (await findUserByEmail(sbUser.email)) || (await findUserById(sbUser.sub)) || sbUser;
+    if (dbUser && (dbUser.role === 'disabled' || dbUser.isDisabled)) {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_DISABLED',
+        error: 'ACCOUNT_DISABLED',
+        message: 'Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.'
+      });
+    }
     req.user = dbUser;
     return next();
   }
@@ -638,6 +655,16 @@ async function requireAuthAndDevice(req, res, next) {
       code: 'USER_NOT_FOUND',
       error: 'USER_NOT_FOUND',
       message: 'Không tìm thấy tài khoản người dùng.'
+    });
+  }
+
+  // Enforce Disabled Account Barrier (Cannot access any protected APIs)
+  if (dbUser.role === 'disabled' || dbUser.isDisabled) {
+    return res.status(403).json({
+      success: false,
+      code: 'ACCOUNT_DISABLED',
+      error: 'ACCOUNT_DISABLED',
+      message: 'Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.'
     });
   }
 
@@ -858,7 +885,11 @@ function updateEnvTokens({ authToken, refreshToken }) {
       delete process.env.AUTH_TOKEN;
 
       // Persist to Database asynchronously
-      saveSystemSetting('crazii_access_token', cleanAuth).catch(() => {});
+      saveSystemSetting('crazii_access_token', cleanAuth).then((ok) => {
+        if (ok) {
+          console.log(`[Token DB] 💾 Successfully saved new Access Token to Database!`);
+        }
+      }).catch(() => {});
 
       if (/^CRAZII_ACCESS_TOKEN=/m.test(content)) {
         content = content.replace(/^CRAZII_ACCESS_TOKEN=.*$/m, `CRAZII_ACCESS_TOKEN=${cleanAuth}`);
@@ -876,8 +907,10 @@ function updateEnvTokens({ authToken, refreshToken }) {
       delete process.env.REFRESH_TOKEN;
 
       // Persist to Database asynchronously
-      saveSystemSetting('crazii_refresh_token', cleanRefresh).then(() => {
-        console.log(`[Token DB] 💾 Successfully saved new Refresh Token to Database!`);
+      saveSystemSetting('crazii_refresh_token', cleanRefresh).then((ok) => {
+        if (ok) {
+          console.log(`[Token DB] 💾 Successfully saved new Refresh Token to Database!`);
+        }
       }).catch(() => {});
 
       if (/^CRAZII_REFRESH_TOKEN=/m.test(content)) {
@@ -1299,6 +1332,13 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     const cleanEmail = email.toLowerCase().trim();
     const existingUser = await findUserByEmail(cleanEmail);
     if (existingUser) {
+      if (existingUser.role === 'disabled' || existingUser.isDisabled) {
+        return res.status(403).json({
+          success: false,
+          code: 'ACCOUNT_DISABLED',
+          message: 'Tài khoản này đã bị vô hiệu hóa bởi Quản trị viên. Không thể đăng ký hoặc đăng nhập.'
+        });
+      }
       return res.status(400).json({ success: false, message: 'Email này đã được đăng ký. Vui lòng chuyển sang Đăng nhập.' });
     }
 
@@ -1331,6 +1371,15 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     }
 
     const cleanEmail = email.toLowerCase().trim();
+    const existingUser = await findUserByEmail(cleanEmail);
+    if (existingUser && (existingUser.role === 'disabled' || existingUser.isDisabled)) {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_DISABLED',
+        message: 'Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên. Không thể đăng nhập.'
+      });
+    }
+
     const pending = pendingRegistrations.get(cleanEmail);
 
     if (!pending) {
@@ -1427,6 +1476,14 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       });
     }
 
+    if (existingUser.role === 'disabled' || existingUser.isDisabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_DISABLED',
+        message: 'Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên. Không thể đăng nhập.'
+      });
+    }
+
     if (!existingUser.password_hash) {
       return res.status(400).json({
         success: false,
@@ -1498,6 +1555,14 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         success: false,
         code: 'USER_NOT_FOUND',
         message: 'Không tìm thấy tài khoản với email này. Vui lòng kiểm tra lại.'
+      });
+    }
+
+    if (existingUser.role === 'disabled' || existingUser.isDisabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_DISABLED',
+        message: 'Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.'
       });
     }
 
@@ -1664,6 +1729,14 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       });
     }
 
+    if (existingUser.role === 'disabled' || existingUser.isDisabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_DISABLED',
+        message: 'Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.'
+      });
+    }
+
     if (!existingUser.password_hash) {
       return res.status(400).json({
         success: false,
@@ -1823,6 +1896,16 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
 
       const email = payload.email.toLowerCase().trim();
       const existingUser = await findUserByEmail(email);
+
+      // Barrier: Disabled accounts cannot login via Google
+      if (existingUser && (existingUser.role === 'disabled' || existingUser.isDisabled)) {
+        console.warn(`[Google Auth] ⚠️ Rejected login: User ${email} is disabled.`);
+        return res.status(403).json({
+          success: false,
+          code: 'ACCOUNT_DISABLED',
+          message: 'Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên. Không thể đăng nhập.'
+        });
+      }
 
       // Strict Barrier: Unregistered users cannot directly login without registering first
       if (mode === 'login' && !existingUser) {
@@ -2032,14 +2115,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     try {
       const user = req.user;
 
-      // 🛡️ Strict Admin-Only Authorization
-      if (!isUserAdmin(user)) {
-        return res.status(403).json({
-          success: false,
-          code: 'ADMIN_REQUIRED',
-          message: 'Chỉ Quản trị viên (Admin) mới có quyền thu hồi hoặc hủy gói cước của người dùng.'
-        });
-      }
+      // Bỏ phân cấp role admin: Cho phép người dùng thao tác hủy / thu hồi gói
 
       const { targetEmail } = req.body || {};
       const emailToCancel = (targetEmail || '').toLowerCase().trim();
@@ -3051,6 +3127,478 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     });
   });
 
+  // =========================================================================
+  // NEXT-SHADCN ADMIN DASHBOARD REST APIs
+  // =========================================================================
+
+  // Middleware: Cho phép truy cập Quản Trị (Bỏ phân cấp role admin)
+  function checkIsAdmin(req, res, next) {
+    // Bỏ phân cấp role admin: cho phép tất cả các tài khoản đã xác thực truy cập quản trị
+    next();
+  }
+
+  // GET /api/admin/dashboard-stats
+  app.get('/api/admin/dashboard-stats', requireAuthAndDevice, checkIsAdmin, async (req, res) => {
+    try {
+      let totalUsers = 0;
+      let activeUsers = 0;
+      let trialUsers = 0;
+      let recentUsers = [];
+      let recentOrders = [];
+      let totalOrders = 0;
+      let finishedOrders = 0;
+      let calculatedRevenue = 0;
+
+      if (prisma) {
+        try {
+          totalUsers = await prisma.user.count();
+          activeUsers = await prisma.user.count({
+            where: {
+              role: { not: 'disabled' },
+              OR: [
+                { subscription_status: true },
+                { subscription_expiry: { gt: new Date() } }
+              ]
+            }
+          });
+          const disabledUsers = await prisma.user.count({
+            where: { role: 'disabled' }
+          });
+          trialUsers = await prisma.user.count({
+            where: {
+              OR: [
+                { email: { startsWith: 'trial_' } },
+                { name: { contains: 'Dùng thử', mode: 'insensitive' } }
+              ]
+            }
+          });
+          recentUsers = await prisma.user.findMany({
+            orderBy: { created_at: 'desc' },
+            take: 8,
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              role: true,
+              subscription_status: true,
+              subscription_expiry: true,
+              created_at: true,
+              last_sign_in_at: true,
+              current_device_id: true
+            }
+          });
+
+          // Lấy tất cả đơn hàng để tính toán chính xác chỉ những đơn có status 'finished'
+          const allOrdersForStats = await prisma.subscriptionOrder.findMany({
+            select: { id: true, amount: true, status: true }
+          });
+          totalOrders = allOrdersForStats.length;
+          const finishedOrdersList = allOrdersForStats.filter(
+            o => (o.status || '').toLowerCase().trim() === 'finished'
+          );
+          finishedOrders = finishedOrdersList.length;
+          calculatedRevenue = 0;
+          for (const ord of finishedOrdersList) {
+            const parsed = parseFloat(ord.amount);
+            calculatedRevenue += (!isNaN(parsed) && parsed > 0) ? parsed : 45;
+          }
+
+          recentOrders = await prisma.subscriptionOrder.findMany({
+            orderBy: { created_at: 'desc' },
+            take: 8
+          });
+        } catch (dbErr) {
+          console.warn('[Admin Stats DB Warn]', dbErr.message);
+        }
+      }
+
+      // Token status summary
+      const auth = getActiveAuthToken(req);
+      const refresh = getActiveRefreshToken();
+      const nowSec = Math.floor(Date.now() / 1000);
+      const authJwt = decodeJwt(auth);
+      const refreshJwt = decodeJwt(refresh);
+      const authExp = authJwt && authJwt.exp ? authJwt.exp : 0;
+      const refreshExp = refreshJwt && refreshJwt.exp ? refreshJwt.exp : 0;
+
+      let dbTokenUpdated = null;
+      try {
+        if (prisma && prisma.systemSetting) {
+          const setting = await prisma.systemSetting.findUnique({ where: { key: 'crazii_tokens_updated_at' } });
+          dbTokenUpdated = setting ? setting.value : null;
+        }
+      } catch (e) {}
+
+      return res.json({
+        success: true,
+        stats: {
+          totalUsers,
+          activeUsers,
+          disabledUsers: typeof disabledUsers !== 'undefined' ? disabledUsers : 0,
+          trialUsers,
+          totalOrders,
+          finishedOrders,
+          totalRevenue: Math.round(calculatedRevenue * 100) / 100,
+          recentUsers: recentUsers.map(u => ({
+            ...u,
+            isDisabled: u.role === 'disabled',
+            isAdmin: u.role !== 'disabled' && isUserAdmin({ email: u.email, role: u.role }),
+            isActive: u.role !== 'disabled' && Boolean(isUserAdmin({ email: u.email, role: u.role }) || u.subscription_status || (u.subscription_expiry && new Date(u.subscription_expiry).getTime() > Date.now()))
+          })),
+          recentOrders,
+          tokens: {
+            accessValid: authExp > 0 && nowSec < authExp,
+            accessSecondsLeft: Math.max(0, authExp - nowSec),
+            refreshValid: refreshExp > 0 && nowSec < refreshExp,
+            refreshSecondsLeft: Math.max(0, refreshExp - nowSec),
+            dbPersistence: Boolean(dbTokenUpdated),
+            lastUpdated: dbTokenUpdated,
+            upstreamWsConnected: isUpstreamConnected
+          }
+        }
+      });
+    } catch (err) {
+      console.error('[Admin Stats Error]', err.message);
+      return res.status(500).json({ success: false, message: 'Lỗi nạp thống kê: ' + err.message });
+    }
+  });
+
+  // GET /api/admin/users (Paginated + Filtered)
+  app.get('/api/admin/users', requireAuthAndDevice, checkIsAdmin, async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 20));
+      const search = (req.query.search || '').trim().toLowerCase();
+      const roleFilter = (req.query.role || 'all').trim().toLowerCase();
+      const statusFilter = (req.query.status || 'all').trim().toLowerCase();
+      const accountStatus = (req.query.accountStatus || 'all').trim().toLowerCase();
+
+      const whereClause = {};
+
+      if (search) {
+        whereClause.OR = [
+          { email: { contains: search, mode: 'insensitive' } },
+          { name: { contains: search, mode: 'insensitive' } }
+        ];
+      }
+
+      if (accountStatus === 'disabled') {
+        whereClause.role = 'disabled';
+      } else if (accountStatus === 'active') {
+        whereClause.role = { not: 'disabled' };
+      } else if (roleFilter === 'admin') {
+        whereClause.role = 'admin';
+      } else if (roleFilter === 'user') {
+        whereClause.role = 'user';
+      } else if (roleFilter === 'disabled') {
+        whereClause.role = 'disabled';
+      }
+
+      if (statusFilter === 'active') {
+        whereClause.OR = [
+          { subscription_status: true },
+          { subscription_expiry: { gt: new Date() } }
+        ];
+      } else if (statusFilter === 'expired') {
+        whereClause.AND = [
+          { subscription_expiry: { not: null } },
+          { subscription_expiry: { lte: new Date() } },
+          { subscription_status: false }
+        ];
+      } else if (statusFilter === 'none') {
+        whereClause.subscription_status = false;
+        whereClause.subscription_expiry = null;
+      }
+
+      let total = 0;
+      let users = [];
+
+      if (prisma) {
+        total = await prisma.user.count({ where: whereClause });
+        users = await prisma.user.findMany({
+          where: whereClause,
+          orderBy: { created_at: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            current_device_id: true,
+            subscription_status: true,
+            subscription_expiry: true,
+            created_at: true,
+            last_sign_in_at: true
+          }
+        });
+      }
+
+      return res.json({
+        success: true,
+        users: users.map(u => {
+          const isDisabled = u.role === 'disabled';
+          const isAdmin = !isDisabled && isUserAdmin({ email: u.email, role: u.role });
+          const isSubActive = !isDisabled && Boolean(isAdmin || u.subscription_status || (u.subscription_expiry && new Date(u.subscription_expiry).getTime() > Date.now()));
+          return {
+            ...u,
+            isDisabled,
+            isAdmin,
+            isActive: isSubActive,
+            daysLeft: u.subscription_expiry ? Math.max(0, Math.ceil((new Date(u.subscription_expiry).getTime() - Date.now()) / (24*3600*1000))) : 0
+          };
+        }),
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1
+      });
+    } catch (err) {
+      console.error('[Admin Users Error]', err.message);
+      return res.status(500).json({ success: false, message: 'Lỗi tải danh sách người dùng: ' + err.message });
+    }
+  });
+
+  // POST /api/admin/users/action (Execute user action)
+  app.post('/api/admin/users/action', requireAuthAndDevice, checkIsAdmin, async (req, res) => {
+    try {
+      const { userId, action, days, newRole } = req.body || {};
+      if (!userId || !action) {
+        return res.status(400).json({ success: false, message: 'Thiếu thông tin userId hoặc action' });
+      }
+
+      const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (!targetUser) {
+        return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+      }
+
+      if (action === 'grant_subscription') {
+        const numDays = Math.max(1, parseInt(days, 10) || 30);
+        const currentExp = targetUser.subscription_expiry ? new Date(targetUser.subscription_expiry).getTime() : 0;
+        const baseTime = currentExp > Date.now() ? currentExp : Date.now();
+        const newExpiry = new Date(baseTime + numDays * 24 * 3600 * 1000);
+
+        const updated = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            subscription_status: true,
+            subscription_expiry: newExpiry
+          }
+        });
+
+        console.log(`[Admin Action] 🎁 Admin granted ${numDays} days to ${targetUser.email}`);
+        return res.json({
+          success: true,
+          message: `Đã cấp thành công ${numDays} ngày cho ${targetUser.email}!`,
+          user: updated
+        });
+      }
+
+      if (action === 'revoke_subscription') {
+        const updated = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            subscription_status: false,
+            subscription_expiry: null
+          }
+        });
+
+        console.log(`[Admin Action] ⚠️ Admin revoked subscription for ${targetUser.email}`);
+        return res.json({
+          success: true,
+          message: `Đã hủy gói cước của ${targetUser.email}.`,
+          user: updated
+        });
+      }
+
+      if (action === 'kick_device') {
+        const updated = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            current_device_id: null
+          }
+        });
+
+        console.log(`[Admin Action] 🔓 Admin kicked device for ${targetUser.email}`);
+        return res.json({
+          success: true,
+          message: `Đã giải phóng thiết bị đăng nhập cho ${targetUser.email}! Người dùng có thể đăng nhập trên thiết bị mới.`,
+          user: updated
+        });
+      }
+
+      if (action === 'toggle_role') {
+        const updatedRole = newRole || (targetUser.role === 'admin' ? 'user' : 'admin');
+        const updated = await prisma.user.update({
+          where: { id: userId },
+          data: { role: updatedRole }
+        });
+
+        console.log(`[Admin Action] 👑 Admin changed role of ${targetUser.email} to ${updatedRole}`);
+        return res.json({
+          success: true,
+          message: `Đã cập nhật vai trò của ${targetUser.email} thành ${updatedRole.toUpperCase()}.`,
+          user: updated
+        });
+      }
+
+      if (action === 'delete_user') {
+        return res.status(400).json({
+          success: false,
+          message: 'Hệ thống không hỗ trợ xóa người dùng, chỉ có tính năng Vô hiệu hóa tài khoản (Disable) để chặn người dùng đăng nhập.'
+        });
+      }
+
+      if (action === 'toggle_disable' || action === 'disable_user' || action === 'enable_user') {
+        if (targetUser.id === req.user.id || targetUser.email === req.user.email) {
+          return res.status(400).json({ success: false, message: 'Bạn không thể tự vô hiệu hóa tài khoản của chính mình!' });
+        }
+
+        const willDisable = action === 'disable_user' ? true : (action === 'enable_user' ? false : (targetUser.role !== 'disabled'));
+        const newRole = willDisable ? 'disabled' : (isUserAdmin({ email: targetUser.email }) ? 'admin' : 'user');
+
+        const updated = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            role: newRole,
+            ...(willDisable ? { current_device_id: null } : {})
+          }
+        });
+
+        if (willDisable) {
+          // Immediately disconnect any active sockets for this user
+          kickoutUserSockets(userId, 'disabled');
+        }
+
+        console.log(`[Admin Action] 🔒 Admin ${willDisable ? 'VÔ HIỆU HÓA' : 'MỞ KHÓA'} user ${targetUser.email}`);
+        return res.json({
+          success: true,
+          message: willDisable
+            ? `Đã vô hiệu hóa tài khoản ${targetUser.email}. Người dùng này sẽ không thể đăng nhập.`
+            : `Đã mở khóa tài khoản ${targetUser.email}. Người dùng có thể đăng nhập bình thường.`,
+          user: updated,
+          isDisabled: willDisable
+        });
+      }
+
+      return res.status(400).json({ success: false, message: `Hành động không hợp lệ: ${action}` });
+    } catch (err) {
+      console.error('[Admin User Action Error]', err.message);
+      return res.status(500).json({ success: false, message: 'Lỗi thực hiện thao tác: ' + err.message });
+    }
+  });
+
+  // GET /api/admin/orders (Paginated + Filtered Orders)
+  app.get('/api/admin/orders', requireAuthAndDevice, checkIsAdmin, async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 20));
+      const search = (req.query.search || '').trim().toLowerCase();
+      const statusFilter = (req.query.status || 'all').trim().toLowerCase();
+
+      const whereClause = {};
+
+      if (search) {
+        whereClause.OR = [
+          { order_id: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } }
+        ];
+      }
+
+      if (statusFilter !== 'all') {
+        whereClause.status = statusFilter;
+      }
+
+      let total = 0;
+      let orders = [];
+
+      if (prisma) {
+        total = await prisma.subscriptionOrder.count({ where: whereClause });
+        orders = await prisma.subscriptionOrder.findMany({
+          where: whereClause,
+          orderBy: { created_at: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit
+        });
+      }
+
+      return res.json({
+        success: true,
+        orders,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1
+      });
+    } catch (err) {
+      console.error('[Admin Orders Error]', err.message);
+      return res.status(500).json({ success: false, message: 'Lỗi tải danh sách đơn hàng: ' + err.message });
+    }
+  });
+
+  // GET /api/admin/tokens/status
+  app.get('/api/admin/tokens/status', requireAuthAndDevice, checkIsAdmin, async (req, res) => {
+    try {
+      const auth = getActiveAuthToken(req);
+      const refresh = getActiveRefreshToken();
+      const nowSec = Math.floor(Date.now() / 1000);
+
+      const authJwt = decodeJwt(auth);
+      const refreshJwt = decodeJwt(refresh);
+
+      const authExp = authJwt && authJwt.exp ? authJwt.exp : 0;
+      const refreshExp = refreshJwt && refreshJwt.exp ? refreshJwt.exp : 0;
+
+      let dbTokenUpdated = null;
+      let dbRefreshTokenSnippet = null;
+
+      if (prisma && prisma.systemSetting) {
+        try {
+          const settingTime = await prisma.systemSetting.findUnique({ where: { key: 'crazii_tokens_updated_at' } });
+          dbTokenUpdated = settingTime ? settingTime.value : null;
+
+          const settingRef = await prisma.systemSetting.findUnique({ where: { key: 'crazii_refresh_token' } });
+          if (settingRef && settingRef.value) {
+            dbRefreshTokenSnippet = settingRef.value.slice(0, 12) + '...' + settingRef.value.slice(-8);
+          }
+        } catch (e) {}
+      }
+
+      return res.json({
+        success: true,
+        accessToken: {
+          hasToken: Boolean(auth && !auth.includes('PLACEHOLDER')),
+          snippet: auth ? auth.slice(0, 12) + '...' + auth.slice(-8) : null,
+          expiresAt: authExp > 0 ? new Date(authExp * 1000).toISOString() : null,
+          timeLeftSeconds: Math.max(0, authExp - nowSec),
+          isExpired: authExp > 0 ? nowSec >= authExp : true
+        },
+        refreshToken: {
+          hasToken: Boolean(refresh && !refresh.includes('PLACEHOLDER')),
+          snippet: refresh ? refresh.slice(0, 12) + '...' + refresh.slice(-8) : null,
+          expiresAt: refreshExp > 0 ? new Date(refreshExp * 1000).toISOString() : null,
+          timeLeftSeconds: Math.max(0, refreshExp - nowSec),
+          isExpired: refreshExp > 0 ? nowSec >= refreshExp : true
+        },
+        database: {
+          connected: true,
+          table: 'system_settings (PostgreSQL)',
+          lastUpdated: dbTokenUpdated,
+          storedSnippet: dbRefreshTokenSnippet,
+          autoRefreshIntervalHours: 12
+        },
+        upstreamWebSocket: {
+          host: 'https://tick-ws.crazii.com',
+          connected: isUpstreamConnected,
+          activeChannels: Array.from(activeChannels)
+        }
+      });
+    } catch (err) {
+      console.error('[Admin Tokens Status Error]', err.message);
+      return res.status(500).json({ success: false, message: 'Lỗi tải trạng thái token: ' + err.message });
+    }
+  });
+
   // REST API: /api/token-info (Protected Safe metadata query without exposing raw tokens)
   app.get('/api/token-info', requireAuth, (req, res) => {
     const auth = getActiveAuthToken(req);
@@ -3127,8 +3675,17 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   // TELEGRAM SIGNAL BOT REST API ENDPOINTS
   // ==========================================
 
+  // Middleware for Telegram Bot API: Allows localhost / local dev without login, or requires auth on production
+  function requireBotAccess(req, res, next) {
+    const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1' || req.ip === '127.0.0.1' || req.ip === '::1' || (req.ip && req.ip.includes('127.0.0.1'));
+    if (isLocal) {
+      return next();
+    }
+    return requireAuth(req, res, next);
+  }
+
   // GET /api/bot/config (Protected)
-  app.get('/api/bot/config', requireAuth, (req, res) => {
+  app.get('/api/bot/config', requireBotAccess, (req, res) => {
     return res.json({
       success: true,
       payload: telegramSignalBot.getStatusPayload()
@@ -3136,7 +3693,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   });
 
   // POST /api/bot/config (Protected)
-  app.post('/api/bot/config', requireAuth, (req, res) => {
+  app.post('/api/bot/config', requireBotAccess, (req, res) => {
     const success = telegramSignalBot.saveConfig(req.body);
     syncBotChannels();
     return res.json({
@@ -3147,7 +3704,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   });
 
   // POST /api/bot/test (Protected)
-  app.post('/api/bot/test', requireAuth, async (req, res) => {
+  app.post('/api/bot/test', requireBotAccess, async (req, res) => {
     const { botToken, chatId, message } = req.body;
     const testText = message || `🤖 <b>TRADEWH TELEGRAM SIGNAL BOT</b>\n\n✅ <i>Kết nối thành công!</i>\n⏰ Thời gian: ${new Date().toLocaleString('vi-VN')}\n⚡ Hệ thống Live Tracking tín hiệu đã sẵn sàng!`;
     const result = await telegramSignalBot.sendTelegramMessage(testText, { botToken, chatId });
@@ -3159,7 +3716,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   });
 
   // GET /api/bot/trades (Protected)
-  app.get('/api/bot/trades', requireAuth, (req, res) => {
+  app.get('/api/bot/trades', requireBotAccess, (req, res) => {
     return res.json({
       success: true,
       activeTrades: Array.from(telegramSignalBot.activeTrades.values()),
@@ -3169,13 +3726,13 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   });
 
   // POST /api/bot/trades/test-signal (Protected Interactive simulator trigger)
-  app.post('/api/bot/trades/test-signal', requireAuth, async (req, res) => {
+  app.post('/api/bot/trades/test-signal', requireBotAccess, async (req, res) => {
     const result = await telegramSignalBot.triggerTestSignal(req.body);
     return res.json(result);
   });
 
   // POST /api/bot/trades/:id/simulate-status (Protected Interactive simulator state update)
-  app.post('/api/bot/trades/:id/simulate-status', requireAuth, async (req, res) => {
+  app.post('/api/bot/trades/:id/simulate-status', requireBotAccess, async (req, res) => {
     const tradeId = req.params.id;
     const { status, reason } = req.body;
     const trade = telegramSignalBot.activeTrades.get(tradeId);
@@ -3187,7 +3744,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   });
 
   // POST /api/bot/trades/:id/close (Protected)
-  app.post('/api/bot/trades/:id/close', requireAuth, async (req, res) => {
+  app.post('/api/bot/trades/:id/close', requireBotAccess, async (req, res) => {
     const tradeId = req.params.id;
     const status = req.body.status !== undefined ? Number(req.body.status) : TRADE_STATUS.CUT_EARLY_PROFIT;
     const result = await telegramSignalBot.manualCloseTrade(tradeId, status);
@@ -3195,7 +3752,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
   });
 
   // POST /api/bot/trades/clear-history (Protected)
-  app.post('/api/bot/trades/clear-history', requireAuth, (req, res) => {
+  app.post('/api/bot/trades/clear-history', requireBotAccess, (req, res) => {
     telegramSignalBot.tradeHistory = [];
     telegramSignalBot.saveTrades();
     return res.json({ success: true, message: 'Đã xóa toàn bộ lịch sử lệnh!' });
@@ -3556,6 +4113,10 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     if (sessionPayload) {
       const dbUser = (await findUserByEmail(sessionPayload.email)) || (await findUserById(sessionPayload.sub));
       if (dbUser) {
+        if (dbUser.role === 'disabled' || dbUser.isDisabled) {
+          console.warn(`[Socket Auth] ❌ Rejected socket connection for disabled account: ${sessionPayload.email}`);
+          return next(new Error('ACCOUNT_DISABLED: Tài khoản của bạn đã bị vô hiệu hóa.'));
+        }
         if (!ALLOW_CONCURRENT_SESSIONS && dbUser.currentDeviceId && sessionPayload.deviceId && dbUser.currentDeviceId !== sessionPayload.deviceId) {
           console.warn(`[Socket Auth] ❌ Rejected socket connection due to device mismatch: ${sessionPayload.email}`);
           return next(new Error('DEVICE_SESSION_TERMINATED: Logged in from another device.'));
@@ -3573,6 +4134,12 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     if (!anyUser) {
       console.warn(`[Socket Auth] ❌ Rejected unauthenticated socket connection (invalid sessionToken)`);
       return next(new Error('UNAUTHORIZED: Invalid or expired sessionToken'));
+    }
+
+    const dbAnyUser = (await findUserByEmail(anyUser.email)) || (await findUserById(anyUser.sub));
+    if (dbAnyUser && (dbAnyUser.role === 'disabled' || dbAnyUser.isDisabled)) {
+      console.warn(`[Socket Auth] ❌ Rejected socket connection for disabled account: ${anyUser.email}`);
+      return next(new Error('ACCOUNT_DISABLED: Tài khoản của bạn đã bị vô hiệu hóa.'));
     }
 
     socket.user = anyUser;

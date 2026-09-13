@@ -640,13 +640,18 @@ function SubscriptionContent() {
     }
   }
 
-  const isActive = Boolean(
+  const isAdmin = Boolean(
     subData?.isAdmin ||
+    user?.role === 'admin' ||
+    user?.isAdmin ||
+    (user?.email && ['dhieu9b@gmail.com', 'buidinhhieu9b@gmail.com'].includes((user.email || '').toLowerCase().trim()))
+  );
+  const isActive = Boolean(
+    isAdmin ||
     subData?.subscriptionStatus ||
     (subData?.subscriptionExpiry && new Date(subData.subscriptionExpiry).getTime() > Date.now())
   );
   const daysLeft = subData?.daysLeft || 0;
-  const isAdmin = subData?.isAdmin;
 
   // Automatically dismiss lingering pending payment messages and clear pending order for active subscribers or admins
   useEffect(() => {
@@ -778,6 +783,31 @@ function SubscriptionContent() {
             >
               <span>📊</span>
               <span>Terminal</span>
+            </Link>
+          )}
+
+          {/* Quản Trị Hệ Thống (Admin Dashboard) Button - Bỏ phân cấp role admin */}
+          {(subData?.email || user?.email) && (
+            <Link
+              href="/admin"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 14px',
+                background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.22) 0%, rgba(171, 151, 140, 0.1) 100%)',
+                color: '#CBB193',
+                border: '1px solid rgba(203, 177, 147, 0.5)',
+                borderRadius: '2px',
+                fontSize: '12px',
+                fontWeight: '700',
+                textDecoration: 'none',
+                boxShadow: '0 2px 8px rgba(203, 177, 147, 0.15)'
+              }}
+              title="Mở Bảng Quản Trị Hệ Thống (Admin Dashboard)"
+            >
+              <span>👑</span>
+              <span>Bảng Quản Trị (Admin) ↗</span>
             </Link>
           )}
 
@@ -978,6 +1008,33 @@ function SubscriptionContent() {
                 <span>🚀</span>
                 <span>MỞ BIỂU ĐỒ TERMINAL (CHART) ↗</span>
               </Link>
+
+              {isAdmin && (
+                <Link
+                  href="/admin"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '10px',
+                    width: '100%',
+                    maxWidth: '380px',
+                    padding: '14px 28px',
+                    background: '#121827',
+                    border: '1px solid #CBB193',
+                    color: '#CBB193',
+                    borderRadius: '3px',
+                    fontSize: '14px',
+                    fontWeight: '800',
+                    textDecoration: 'none',
+                    marginTop: '12px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <span>👑</span>
+                  <span>MỞ TRANG QUẢN TRỊ (ADMIN DASHBOARD) ↗</span>
+                </Link>
+              )}
 
               <p style={{ fontSize: '12px', color: '#6B7C98', marginTop: '16px', marginBottom: 0 }}>
                 💡 Gói cước của bạn đã được xác nhận. Các gói cước mua mới tự động ẩn để tránh nhầm lẫn.
@@ -1501,8 +1558,72 @@ function SubscriptionContent() {
         {/* ========================================================================= */}
         {/* VIEW: ADMIN MANAGEMENT CENTER                                             */}
         {/* ========================================================================= */}
-        {isAdmin && (
+        {(subData?.email || user?.email) && (
           <div style={{ width: '100%', maxWidth: '820px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+            {/* QUICK ROUTE HUB: DIRECT LINK TO NEXT-SHADCN ADMIN DASHBOARD */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.15) 0%, rgba(13, 18, 31, 0.95) 100%)',
+              border: '1px solid #CBB193',
+              borderRadius: '4px',
+              padding: '20px 24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#CBB193', fontWeight: '800', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                    👑 BẢNG QUẢN TRỊ HỆ THỐNG MỚI (NEXT-SHADCN ADMIN DASHBOARD)
+                  </div>
+                  <h3 style={{ fontSize: '17px', fontWeight: '900', color: '#FFFFFF', margin: '4px 0 0 0' }}>
+                    Chuyển sang Bảng Quản Trị Phân Hệ Độc Lập
+                  </h3>
+                  <p style={{ fontSize: '12px', color: '#8899A6', margin: '3px 0 0 0' }}>
+                    Mỗi phân hệ quản lý đã được thiết kế thành một route riêng biệt:
+                  </p>
+                </div>
+                <Link
+                  href="/admin"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    background: 'linear-gradient(135deg, #CBB193 0%, #AB978C 100%)',
+                    color: '#0B0E14',
+                    fontWeight: '800',
+                    fontSize: '13px',
+                    borderRadius: '3px',
+                    textDecoration: 'none',
+                    boxShadow: '0 2px 10px rgba(203, 177, 147, 0.3)'
+                  }}
+                >
+                  <span>👑</span>
+                  <span>MỞ ADMIN DASHBOARD ↗</span>
+                </Link>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px' }}>
+                <Link href="/admin" style={{ padding: '10px 14px', background: '#090D16', border: '1px solid #1E2638', borderRadius: '3px', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#CBB193' }}>📊 /admin</span>
+                  <span style={{ fontSize: '11px', color: '#8899A6' }}>Tổng quan KPI & Đơn hàng</span>
+                </Link>
+                <Link href="/admin/users" style={{ padding: '10px 14px', background: '#090D16', border: '1px solid #1E2638', borderRadius: '3px', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#00E5FF' }}>👥 /admin/users</span>
+                  <span style={{ fontSize: '11px', color: '#8899A6' }}>Cấp gói & Kick thiết bị</span>
+                </Link>
+                <Link href="/admin/subscriptions" style={{ padding: '10px 14px', background: '#090D16', border: '1px solid #1E2638', borderRadius: '3px', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#4ADE80' }}>🎲 /admin/subscriptions</span>
+                  <span style={{ fontSize: '11px', color: '#8899A6' }}>Tạo Trial 1-click & NOWPayments</span>
+                </Link>
+                <Link href="/admin/tokens" style={{ padding: '10px 14px', background: '#090D16', border: '1px solid #1E2638', borderRadius: '3px', textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#F59E0B' }}>🔑 /admin/tokens</span>
+                  <span style={{ fontSize: '11px', color: '#8899A6' }}>Đồng hồ token & Proxy WS</span>
+                </Link>
+              </div>
+            </div>
             
             {/* TOOL 1: 1-CLICK RANDOM TRIAL GENERATOR */}
             <div style={{

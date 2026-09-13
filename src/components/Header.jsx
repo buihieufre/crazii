@@ -59,10 +59,20 @@ export default function Header({
   const saveDropdownRef = useRef(null);
   const userDropdownRef = useRef(null);
 
+  // Robust Admin check (supports email whitelist, role case-insensitivity, and cached crazii_user fallback)
+  let effectiveUser = user;
+  if (!effectiveUser && typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('crazii_user');
+      if (raw) effectiveUser = JSON.parse(raw);
+    } catch (e) {}
+  }
+
   const isAdmin = Boolean(
-    user && (
-      ['dhieu9b@gmail.com', 'buidinhhieu9b@gmail.com'].includes((user.email || '').toLowerCase().trim()) ||
-      user.role === 'admin'
+    effectiveUser && (
+      ['dhieu9b@gmail.com', 'buidinhhieu9b@gmail.com'].includes((effectiveUser.email || '').toLowerCase().trim()) ||
+      (effectiveUser.role || '').toLowerCase() === 'admin' ||
+      effectiveUser.isAdmin === true
     )
   );
 
@@ -413,9 +423,10 @@ export default function Header({
             </Link>
           )}
 
-          {isAdmin && (
+          {/* Admin Dashboard Direct Button - Bỏ phân cấp role admin, hiển thị cho mọi user */}
+          {effectiveUser && (
             <Link
-              href="/subscription"
+              href="/admin"
               className="btn subscription-btn-highlight"
               style={{
                 textDecoration: 'none',
@@ -428,7 +439,7 @@ export default function Header({
                 fontWeight: '700',
                 boxShadow: '0 1px 6px rgba(203, 177, 147, 0.15)'
               }}
-              title="Quản Trị Viên: Tạo TK Dùng Thử & Quản Lý"
+              title="Mở Bảng Quản Trị Hệ Thống (Admin Dashboard)"
             >
               <span>👑</span>
               <span>Quản Trị</span>
@@ -616,26 +627,26 @@ export default function Header({
 
                   {/* Navigation Links */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {isAdmin && (
+                    {effectiveUser && (
                       <Link
-                        href="/subscription"
+                        href="/admin"
                         onClick={() => setIsUserMenuOpen(false)}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           gap: '8px',
                           padding: '8px 10px',
-                          background: 'rgba(203, 177, 147, 0.1)',
-                          border: '1px solid rgba(203, 177, 147, 0.3)',
+                          background: 'rgba(203, 177, 147, 0.15)',
+                          border: '1px solid rgba(203, 177, 147, 0.4)',
                           borderRadius: '4px',
                           color: '#CBB193',
                           fontSize: '12px',
-                          fontWeight: '700',
+                          fontWeight: '800',
                           textDecoration: 'none'
                         }}
                       >
                         <span>👑</span>
-                        <span>Trung Tâm Quản Trị Subscription</span>
+                        <span>Bảng Quản Trị Hệ Thống (Admin Dashboard)</span>
                       </Link>
                     )}
 
@@ -855,31 +866,33 @@ export default function Header({
           {/* Group 5: Subscription & Admin Panel */}
           <div className="mobile-drawer-group">
             <div className="mobile-group-title">
-              <span>{isAdmin ? '👑' : '💎'}</span>
-              <span>{isAdmin ? 'QUẢN TRỊ VIÊN' : 'GÓI THÀNH VIÊN PRO'}</span>
+              <span>👑</span>
+              <span>QUẢN TRỊ VIÊN & GÓI CƯỚC</span>
             </div>
             
-            {isAdmin ? (
-              <Link
-                href="/subscription"
-                className="mobile-admin-btn"
-                onClick={() => setIsMobileDrawerOpen(false)}
-                style={{
-                  textDecoration: 'none',
-                  background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
-                  borderColor: 'rgba(203, 177, 147, 0.45)',
-                  color: '#CBB193',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  fontWeight: '700'
-                }}
-              >
-                <span>👑</span>
-                <span>Tạo Tài Khoản Dùng Thử & Quản Trị</span>
-              </Link>
-            ) : isSubscribed ? (
+            {/* Direct Admin Dashboard link for all users */}
+            <Link
+              href="/admin"
+              className="mobile-admin-btn"
+              onClick={() => setIsMobileDrawerOpen(false)}
+              style={{
+                textDecoration: 'none',
+                background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.22) 0%, rgba(171, 151, 140, 0.1) 100%)',
+                borderColor: 'rgba(203, 177, 147, 0.5)',
+                color: '#CBB193',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                fontWeight: '700',
+                marginBottom: '10px'
+              }}
+            >
+              <span>👑</span>
+              <span>Bảng Quản Trị Hệ Thống (Admin)</span>
+            </Link>
+
+            {isSubscribed ? (
               <div
                 style={{
                   padding: '12px',

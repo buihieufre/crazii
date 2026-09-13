@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
@@ -51,7 +52,7 @@ class TelegramSignalBot {
       }
       this.loadConfig();
       this.loadTrades();
-      console.log(`[Telegram Bot] 🤖 Signal Bot Engine initialized. (Enabled: ${this.config.enabled}, Monitored: [${this.config.monitoredSymbols.join(', ')}])`);
+      console.log(`[Telegram Bot] 🤖 Signal Bot Engine initialized. (Enabled: ${this.config.enabled}, Monitored: [${this.config.monitoredSymbols.join(', ')}], HasToken: ${Boolean(this.config.botToken)}, ChatId: ${this.config.chatId || 'none'})`);
     } catch (e) {
       console.error(`[Telegram Bot] Initialization error:`, e.message);
     }
@@ -68,17 +69,39 @@ class TelegramSignalBot {
       console.warn(`[Telegram Bot] Failed to load config from file:`, e.message);
     }
 
-    // Load from environment variables (.env) if present
-    if (process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN) {
-      this.config.botToken = (process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN).trim();
+    // Explicit .env variables take precedence whenever defined
+    const envBotToken = (process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN || '').trim();
+    if (envBotToken) {
+      this.config.botToken = envBotToken;
     }
-    if (process.env.TELEGRAM_CHAT_ID || process.env.CHAT_ID) {
-      this.config.chatId = (process.env.TELEGRAM_CHAT_ID || process.env.CHAT_ID).trim();
+
+    const envChatId = (process.env.TELEGRAM_CHAT_ID || process.env.CHAT_ID || '').trim();
+    if (envChatId) {
+      this.config.chatId = envChatId;
     }
   }
 
   saveConfig(newConfig = {}) {
-    this.config = { ...this.config, ...newConfig };
+    const envBotToken = (process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN || '').trim();
+    const envChatId = (process.env.TELEGRAM_CHAT_ID || process.env.CHAT_ID || '').trim();
+
+    // Preserve existing token if newConfig passed empty string (e.g. from frontend redacted field)
+    const tokenToSave = (newConfig.botToken && newConfig.botToken.trim())
+      ? newConfig.botToken.trim()
+      : (this.config.botToken || envBotToken);
+
+    // Preserve existing chatId if newConfig passed empty string
+    const chatIdToSave = (newConfig.chatId && newConfig.chatId.trim())
+      ? newConfig.chatId.trim()
+      : (this.config.chatId || envChatId);
+
+    this.config = {
+      ...this.config,
+      ...newConfig,
+      botToken: tokenToSave,
+      chatId: chatIdToSave
+    };
+
     try {
       if (!fs.existsSync(this.dataDir)) {
         fs.mkdirSync(this.dataDir, { recursive: true });
@@ -627,7 +650,8 @@ ${statusLines.join('\n')}`;
       config: {
         ...safeConfig,
         hasBotToken: Boolean(this.config.botToken),
-        botTokenPreview: this.config.botToken ? `${this.config.botToken.slice(0, 6)}...${this.config.botToken.slice(-4)}` : ''
+        botTokenPreview: this.config.botToken ? `${this.config.botToken.slice(0, 6)}...${this.config.botToken.slice(-4)}` : '',
+        hasChatId: Boolean(this.config.chatId)
       },
       activeTrades: Array.from(this.activeTrades.values()),
       tradeHistory: this.tradeHistory.slice(0, 50),

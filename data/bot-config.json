@@ -1,7 +1,7 @@
 {
-  "enabled": true,
-  "botToken": "",
-  "chatId": "",
+  "enabled": false,
+  "botToken": "0383853356",
+  "chatId": "-1004310810675",
   "maxConcurrentTrades": 10,
   "defaultSlOffset": 20,
   "monitoredSymbols": [
@@ -9,5 +9,8 @@
   ],
   "enableNotifications": true,
   "allowEarlyCut": true,
-  "autoMoveSlToBreakEven": true
+  "autoMoveSlToBreakEven": true,
+  "hasBotToken": true,
+  "botTokenPreview": "838641...qMTs",
+  "hasChatId": true
 }

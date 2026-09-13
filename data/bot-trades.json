@@ -1,5 +1,42 @@
 {
-  "activeTrades": [],
+  "activeTrades": [
+    {
+      "id": "DEMO_XAUUSD.CA_5_M5_7294",
+      "symbol": "XAUUSD.ca_5",
+      "cleanSymbol": "XAUUSD.CA_5",
+      "timeframe": "5",
+      "dir": 1,
+      "entry": 2918.5,
+      "sl": 2898.5,
+      "tp1": 2948.5,
+      "tp2": 2978.5,
+      "msg_id": null,
+      "status": 0,
+      "openedAt": 1788884117294,
+      "updatedAt": 1788884117294,
+      "closedAt": null,
+      "decimals": 2
+    },
+    {
+      "id": "DEMO_XAUUSD.CA_5_M5_2142",
+      "symbol": "XAUUSD.ca_5",
+      "cleanSymbol": "XAUUSD.CA_5",
+      "timeframe": "5",
+      "dir": 1,
+      "entry": 2918.5,
+      "sl": 2918.5,
+      "tp1": 2948.5,
+      "tp2": 2978.5,
+      "msg_id": 54,
+      "status": 1,
+      "openedAt": 1788884422142,
+      "updatedAt": 1788884431196,
+      "closedAt": null,
+      "decimals": 2,
+      "original_sl": 2898.5,
+      "isBreakEven": true
+    }
+  ],
   "tradeHistory": [
     {
       "id": "DEMO_XAUUSD.CA_5_M5_8641",
@@ -19,5 +56,5 @@
       "decimals": 2
     }
   ],
-  "lastUpdated": 1788604031787
+  "lastUpdated": 1788884432091
 }

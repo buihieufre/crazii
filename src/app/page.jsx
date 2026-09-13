@@ -20,7 +20,15 @@ import { getDefaultTimezone } from '@/lib/timezones';
 export default function TerminalPage() {
   // Google & Supabase Sign-In Barrier Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('crazii_user');
+        if (raw) return JSON.parse(raw);
+      } catch (e) {}
+    }
+    return null;
+  });
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isChartReady, setIsChartReady] = useState(false);
   const [loadingStageText, setLoadingStageText] = useState('Đang kết nối hệ thống...');

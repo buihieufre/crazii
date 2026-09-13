@@ -27,6 +27,9 @@ export default function BotConfigPage() {
     enabled: false,
     botToken: '',
     chatId: '',
+    hasBotToken: false,
+    botTokenPreview: '',
+    hasChatId: false,
     maxConcurrentTrades: 10,
     defaultSlOffset: 20,
     monitoredSymbols: ['XAUUSD.ca_5', 'BTCUSD_5'],
@@ -54,10 +57,22 @@ export default function BotConfigPage() {
   const [lastSimTradeId, setLastSimTradeId] = useState(null);
   const [previewStatus, setPreviewStatus] = useState(0); // 0, 1, 2, -1, 3, -2
 
+  // Helper to obtain authorization headers with session token
+  const getAuthHeaders = () => {
+    const token = typeof window !== 'undefined'
+      ? (localStorage.getItem('crazii_session_token') || localStorage.getItem('tradewh_session_token'))
+      : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
   // Load config & trades from server
   const loadBotData = useCallback(async () => {
     try {
-      const res = await fetch('/api/bot/config');
+      const res = await fetch('/api/bot/config', { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (data.payload) {
@@ -65,7 +80,9 @@ export default function BotConfigPage() {
             setConfig((prev) => ({
               ...prev,
               ...data.payload.config,
-              botToken: data.payload.config.botToken || prev.botToken
+              // Keep user's unsaved custom typing if any, otherwise keep empty
+              botToken: prev.botToken || '',
+              chatId: data.payload.config.chatId || prev.chatId || ''
             }));
           }
           if (data.payload.activeTrades) setActiveTrades(data.payload.activeTrades);
@@ -94,7 +111,7 @@ export default function BotConfigPage() {
       const payload = { ...config, ...overrideParams };
       const res = await fetch('/api/bot/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       });
       const data = await res.json();
@@ -115,8 +132,11 @@ export default function BotConfigPage() {
 
   // Test Telegram Connection
   const handleTestConnection = async () => {
-    if (!config.botToken || !config.chatId) {
-      setFeedback({ type: 'error', message: '⚠️ Vui lòng nhập cả Bot Token và Chat ID trước khi kiểm tra kết nối.' });
+    const hasToken = Boolean(config.botToken || config.hasBotToken);
+    const targetChatId = config.chatId;
+
+    if (!hasToken || !targetChatId) {
+      setFeedback({ type: 'error', message: '⚠️ Vui lòng cấu hình Bot Token và Chat ID trước khi kiểm tra kết nối.' });
       return;
     }
 
@@ -125,10 +145,10 @@ export default function BotConfigPage() {
     try {
       const res = await fetch('/api/bot/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
-          botToken: config.botToken,
-          chatId: config.chatId
+          botToken: config.botToken || undefined,
+          chatId: targetChatId
         })
       });
       const data = await res.json();
@@ -156,7 +176,10 @@ export default function BotConfigPage() {
 
   // Trigger Demo Test Signal
   const handleTriggerTestSignal = async () => {
-    if (!config.botToken || !config.chatId) {
+    const hasToken = Boolean(config.botToken || config.hasBotToken);
+    const hasChat = Boolean(config.chatId);
+
+    if (!hasToken || !hasChat) {
       setFeedback({ type: 'error', message: '⚠️ Vui lòng cấu hình Bot Token và Chat ID trước khi bắn tín hiệu thử.' });
       return;
     }
@@ -166,7 +189,7 @@ export default function BotConfigPage() {
     try {
       const res = await fetch('/api/bot/trades/test-signal', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           symbol: simPair,
           dir: simDir,
@@ -177,10 +200,17 @@ export default function BotConfigPage() {
       if (data.success && data.trade) {
         setLastSimTradeId(data.trade.id);
         setPreviewStatus(0);
-        setFeedback({
-          type: 'success',
-          message: `🚀 Đã bắn tín hiệu #${data.trade.id} (${simDir === 1 ? 'BUY' : 'SELL'}) tới Telegram! Hãy kiểm tra nhóm chat và bấm các nút bên dưới để xem tin nhắn tự sửa trực tiếp.`
-        });
+        if (data.telegramResult && !data.telegramResult.success) {
+          setFeedback({
+            type: 'error',
+            message: `⚠️ Lệnh #${data.trade.id} đã tạo nhưng Telegram từ chối gửi tin nhắn: ${data.telegramResult.error || data.telegramResult.message || 'Lỗi kiểm tra Bot Token hoặc Chat ID'}`
+          });
+        } else {
+          setFeedback({
+            type: 'success',
+            message: `🚀 Đã bắn tín hiệu #${data.trade.id} (${simDir === 1 ? 'BUY' : 'SELL'}) tới Telegram! Hãy kiểm tra nhóm chat và bấm các nút bên dưới để xem tin nhắn tự sửa trực tiếp.`
+          });
+        }
         loadBotData();
       } else {
         setFeedback({ type: 'error', message: `❌ Lỗi bắn tín hiệu: ${data.message || 'Không thể gửi'}` });
@@ -198,7 +228,7 @@ export default function BotConfigPage() {
     try {
       const res = await fetch(`/api/bot/trades/${encodeURIComponent(tradeId)}/simulate-status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ status: newStatus, reason: reasonText })
       });
       const data = await res.json();
@@ -221,7 +251,7 @@ export default function BotConfigPage() {
     try {
       const res = await fetch(`/api/bot/trades/${encodeURIComponent(tradeId)}/close`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ status })
       });
       const data = await res.json();
@@ -238,7 +268,10 @@ export default function BotConfigPage() {
   const handleClearHistory = async () => {
     if (!confirm('Bạn có chắc muốn xóa toàn bộ lịch sử lệnh đã đóng?')) return;
     try {
-      const res = await fetch('/api/bot/trades/clear-history', { method: 'POST' });
+      const res = await fetch('/api/bot/trades/clear-history', {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         setTradeHistory([]);
         setFeedback({ type: 'info', message: 'Đã xóa sạch lịch sử lệnh.' });
@@ -369,7 +402,26 @@ export default function BotConfigPage() {
               transition: 'all 0.2s'
             }}
           >
-            <span>←</span> Quay lại Biểu đồ (Terminal)
+            <span>←</span> Biểu đồ (Terminal)
+          </Link>
+          <Link
+            href="/admin"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 14px',
+              borderRadius: 6,
+              background: 'rgba(203, 177, 147, 0.15)',
+              border: '1px solid rgba(203, 177, 147, 0.4)',
+              color: '#CBB193',
+              textDecoration: 'none',
+              fontSize: 13,
+              fontWeight: 700,
+              transition: 'all 0.2s'
+            }}
+          >
+            <span>👑</span> Bảng Quản Trị (Admin)
           </Link>
           <div style={{ fontSize: 16, fontWeight: 900, color: '#CBB193', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>🤖 TRADEWH</span>
@@ -473,8 +525,8 @@ export default function BotConfigPage() {
 
           <div style={{ background: '#151821', border: '1px solid #1e222d', borderRadius: 10, padding: '16px 18px' }}>
             <div style={{ fontSize: 12, color: '#787b86', fontWeight: 700, letterSpacing: 0.5 }}>TRẠNG THÁI TELEGRAM</div>
-            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 10, color: config.botToken && config.chatId ? '#00E676' : '#ffa726' }}>
-              {config.botToken && config.chatId ? '✅ Đã cấu hình' : '⚠️ Chưa đủ thông tin'}
+            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 10, color: (config.botToken || config.hasBotToken) && config.chatId ? '#00E676' : '#ffa726' }}>
+              {(config.botToken || config.hasBotToken) && config.chatId ? '✅ Đã cấu hình' : '⚠️ Chưa đủ thông tin'}
             </div>
             <div style={{ fontSize: 11, color: '#787b86', marginTop: 4, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
               {config.chatId ? `Chat: ${config.chatId}` : 'Chưa đặt Chat ID'}
@@ -670,7 +722,7 @@ export default function BotConfigPage() {
                   </div>
                   <input
                     type={showToken ? 'text' : 'password'}
-                    placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ..."
+                    placeholder={config.hasBotToken ? `Đã cấu hình trong .env (${config.botTokenPreview || 'Sẵn sàng'})` : '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ...'}
                     value={config.botToken || ''}
                     onChange={(e) => setConfig({ ...config, botToken: e.target.value.trim() })}
                     style={{
@@ -685,7 +737,13 @@ export default function BotConfigPage() {
                     }}
                   />
                   <div style={{ fontSize: 11, color: '#787b86', marginTop: 4 }}>
-                    Tạo bot tại <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" style={{ color: '#00E5FF' }}>@BotFather</a> để nhận mã Token.
+                    {config.hasBotToken && !config.botToken ? (
+                      <span style={{ color: '#00E676', fontWeight: 600 }}>
+                        🔒 Token đã nạp tự động từ .env ({config.botTokenPreview}). Bạn có thể để trống hoặc nhập token mới để ghi đè.
+                      </span>
+                    ) : (
+                      <>Tạo bot tại <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" style={{ color: '#00E5FF' }}>@BotFather</a> để nhận mã Token.</>
+                    )}
                   </div>
                 </div>
 
