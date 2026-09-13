@@ -25,7 +25,7 @@ export default function TerminalPage() {
       try {
         const raw = localStorage.getItem('crazii_user');
         if (raw) return JSON.parse(raw);
-      } catch (e) {}
+      } catch (e) { }
     }
     return null;
   });
@@ -104,7 +104,7 @@ export default function TerminalPage() {
           setIsRightSidebarOpen(saved === 'true');
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }, []);
 
   const handleToggleRightSidebar = useCallback(() => {
@@ -112,7 +112,7 @@ export default function TerminalPage() {
       const next = !prev;
       try {
         localStorage.setItem('tradewh_right_sidebar_open', String(next));
-      } catch (e) {}
+      } catch (e) { }
       return next;
     });
   }, []);
@@ -147,7 +147,7 @@ export default function TerminalPage() {
       try {
         socketRef.current.removeAllListeners();
         socketRef.current.disconnect();
-      } catch (e) {}
+      } catch (e) { }
       socketRef.current = null;
     }
     if (token) {
@@ -156,12 +156,12 @@ export default function TerminalPage() {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` }
         });
-      } catch (e) {}
+      } catch (e) { }
     }
     try {
       const supabase = createSupabaseClient();
       await supabase.auth.signOut();
-    } catch (e) {}
+    } catch (e) { }
     if (typeof window !== 'undefined') {
       localStorage.removeItem('crazii_session_token');
       localStorage.removeItem('tradewh_session_token');
@@ -219,7 +219,7 @@ export default function TerminalPage() {
               }
             }
           }
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('crazii_session_token') : null;
@@ -268,7 +268,7 @@ export default function TerminalPage() {
                   parsed.subscriptionStatus = false;
                   parsed.subscription_status = false;
                   localStorage.setItem('crazii_user', JSON.stringify(parsed));
-                } catch (e) {}
+                } catch (e) { }
                 window.location.replace('/subscription');
               }
               return;
@@ -311,7 +311,7 @@ export default function TerminalPage() {
         const supabase = createSupabaseClient();
         const supaPromise = supabase.auth.getSession();
         const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ data: {} }), 1000));
-        
+
         const { data: { session } } = await Promise.race([supaPromise, timeoutPromise]);
         if (session?.user && isMounted) {
           try {
@@ -347,7 +347,7 @@ export default function TerminalPage() {
               setLoadingStageText('Đang tải dữ liệu biểu đồ...');
               return;
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       } catch (supaErr) {
         console.warn('Supabase getSession error:', supaErr);
@@ -436,7 +436,7 @@ export default function TerminalPage() {
     setActiveTimezone(tz);
     try {
       localStorage.setItem('crazii_timezone_id', tz.id);
-    } catch (e) {}
+    } catch (e) { }
   }, []);
 
   // Fetch Token Info from Backend
@@ -498,7 +498,7 @@ export default function TerminalPage() {
         if (!isSilent && slotIndex === 0) {
           setNotification({
             type: 'warning',
-            message: 'Dữ liệu nến tạm dừng (Token Upstream Crazii đã hết hạn). Quản trị viên vui lòng vào /admin/tokens để cập nhật Token mới.'
+            message: 'Dữ liệu nến tạm dừng (Token Upstream Crazii đã hết hạn). Quản trị viên vui lòng cập nhật crazii_refresh_token trong Database.'
           });
         }
         return;
@@ -786,7 +786,7 @@ export default function TerminalPage() {
           data.isAutoSave = next;
           localStorage.setItem('crazii_chart_autosave_v1', JSON.stringify(data));
         }
-      } catch (e) {}
+      } catch (e) { }
       return next;
     });
   }, []);
@@ -797,7 +797,7 @@ export default function TerminalPage() {
     setActiveSlotIndex(0);
     try {
       localStorage.removeItem('crazii_chart_autosave_v1');
-    } catch (e) {}
+    } catch (e) { }
     setLastSavedTime(null);
     setSaveStatus('saved');
   }, []);

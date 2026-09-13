@@ -53,7 +53,7 @@ export async function GET(request) {
         status: response.status,
         statusText: response.statusText,
         message: isUpstreamAuth
-          ? 'Unauthorized: Token Crazii Upstream đã hết hạn hoặc không hợp lệ. Vui lòng vào Quản Trị (/admin/tokens) để cập nhật Token mới.'
+          ? 'Unauthorized: Token Crazii Upstream đã hết hạn hoặc không hợp lệ. Vui lòng cập nhật crazii_refresh_token trong Database.'
           : `Target API Error: ${response.statusText}`,
         raw: errorText
       }, { status: isUpstreamAuth ? 502 : response.status });

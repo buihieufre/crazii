@@ -333,7 +333,7 @@ export default function AdminOverviewPage() {
         </Link>
 
         <Link
-          href="/admin/tokens"
+          href="/bot-config"
           style={{
             background: '#0D121F',
             border: '1px solid #1A2234',
@@ -349,12 +349,12 @@ export default function AdminOverviewPage() {
           onMouseLeave={(e) => e.currentTarget.style.borderColor = '#1A2234'}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ fontSize: '20px', padding: '8px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.1)', color: '#10B981' }}>
-              🔑
+            <div style={{ fontSize: '20px', padding: '8px', borderRadius: '6px', background: 'rgba(0, 136, 204, 0.1)', color: '#0088cc' }}>
+              🤖
             </div>
             <div>
-              <div style={{ fontSize: '14px', fontWeight: '700', color: '#F1F5F9' }}>Quản trị Token Crazii</div>
-              <div style={{ fontSize: '12px', color: '#8899A6' }}>Đồng hồ đếm ngược, lưu trữ DB, auto refresh</div>
+              <div style={{ fontSize: '14px', fontWeight: '700', color: '#F1F5F9' }}>Telegram Signal Bot</div>
+              <div style={{ fontSize: '12px', color: '#8899A6' }}>Cấu hình bot báo tín hiệu tự động kênh Telegram</div>
             </div>
           </div>
           <span style={{ color: '#8899A6', fontSize: '16px' }}>→</span>
@@ -506,26 +506,25 @@ export default function AdminOverviewPage() {
                           background: isFinished
                             ? 'rgba(34, 197, 94, 0.15)'
                             : isConfirming
-                            ? 'rgba(59, 130, 246, 0.15)'
-                            : isWaiting
-                            ? 'rgba(234, 179, 8, 0.15)'
-                            : 'rgba(239, 68, 68, 0.15)',
+                              ? 'rgba(59, 130, 246, 0.15)'
+                              : isWaiting
+                                ? 'rgba(234, 179, 8, 0.15)'
+                                : 'rgba(239, 68, 68, 0.15)',
                           color: isFinished
                             ? '#4ADE80'
                             : isConfirming
-                            ? '#60A5FA'
-                            : isWaiting
-                            ? '#FACC15'
-                            : '#F87171',
-                          border: `1px solid ${
-                            isFinished
+                              ? '#60A5FA'
+                              : isWaiting
+                                ? '#FACC15'
+                                : '#F87171',
+                          border: `1px solid ${isFinished
                               ? 'rgba(34, 197, 94, 0.3)'
                               : isConfirming
-                              ? 'rgba(59, 130, 246, 0.3)'
-                              : isWaiting
-                              ? 'rgba(234, 179, 8, 0.3)'
-                              : 'rgba(239, 68, 68, 0.3)'
-                          }`
+                                ? 'rgba(59, 130, 246, 0.3)'
+                                : isWaiting
+                                  ? 'rgba(234, 179, 8, 0.3)'
+                                  : 'rgba(239, 68, 68, 0.3)'
+                            }`
                         }}>
                           {o.status || 'pending'}
                         </span>

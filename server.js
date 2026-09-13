@@ -153,9 +153,9 @@ function kickoutUserSockets(userIdentifier, newDeviceId) {
               message: 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.'
             });
             setTimeout(() => {
-              try { s.disconnect(true); } catch (e) {}
+              try { s.disconnect(true); } catch (e) { }
             }, 100);
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     }
@@ -243,7 +243,7 @@ async function saveUserToDb(userObj) {
         last_sign_in_at: dataPayload.last_sign_in_at ? dataPayload.last_sign_in_at.toISOString() : now.toISOString()
       }, { onConflict: 'id' }).select().maybeSingle();
       return data;
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return null;
@@ -309,7 +309,7 @@ async function findUserByEmail(email) {
           isDisabled: data.role === 'disabled'
         };
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return null;
@@ -377,7 +377,7 @@ async function findUserById(id) {
           isDisabled: data.role === 'disabled'
         };
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return null;
@@ -435,7 +435,7 @@ async function saveSubscriptionOrder(orderObj) {
         updated_at: new Date().toISOString()
       };
       await supabaseServer.from('subscription_orders').upsert(payload, { onConflict: 'order_id' });
-    } catch (e) {}
+    } catch (e) { }
   }
 }
 
@@ -471,7 +471,7 @@ async function findSubscriptionOrder(orderId) {
         .eq('order_id', orderId)
         .maybeSingle();
       if (!error && data) return formatSubscriptionOrder(data);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return null;
@@ -506,7 +506,7 @@ async function findSubscriptionOrderByPaymentId(paymentId) {
         .or(`cryptomus_uuid.eq.${strId},order_id.eq.${strId}`)
         .maybeSingle();
       if (!error && data) return formatSubscriptionOrder(data);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return null;
@@ -551,7 +551,7 @@ async function recordUserLoginToSupabase(user, req) {
         logged_in_at: new Date().toISOString(),
         ip_address: ip
       });
-    } catch (e) {}
+    } catch (e) { }
   }
 }
 
@@ -614,7 +614,7 @@ async function verifyAnyToken(token) {
         supabase_id: user.id
       };
     }
-  } catch (e) {}
+  } catch (e) { }
 
   return null;
 }
@@ -738,7 +738,7 @@ async function requireSubscription(req, res, next) {
 }
 
 /**
- * Helper to decode JWT Payload without external dependencies
+ * Helper to decode JWT Payload without external dependencies (supports base64url)
  */
 function decodeJwt(token) {
   if (!token || typeof token !== 'string') return null;
@@ -746,7 +746,11 @@ function decodeJwt(token) {
   const parts = clean.split('.');
   if (parts.length < 2) return null;
   try {
-    const payloadStr = Buffer.from(parts[1], 'base64').toString('utf8');
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) {
+      base64 += '=';
+    }
+    const payloadStr = Buffer.from(base64, 'base64').toString('utf8');
     const parsed = JSON.parse(payloadStr);
     if (parsed && typeof parsed === 'object') {
       delete parsed.upn;
@@ -763,30 +767,55 @@ let memoryRefreshToken = '';
 let memoryDeviceId = 'fb70bf82-5d83-4c70-b7e6-9896bda770e7';
 
 function initTokensFromEnv() {
+  const nowSec = Math.floor(Date.now() / 1000);
   try {
     const envPath = path.join(__dirname, '.env');
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
       const authMatch = envContent.match(/^(?:CRAZII_ACCESS_TOKEN|CRAZII_AUTH_TOKEN|AUTH_TOKEN)=(.*)$/m);
       if (authMatch && authMatch[1].trim() && !authMatch[1].includes('PLACEHOLDER')) {
-        memoryAccessToken = authMatch[1].trim().replace(/^Bearer\s+/i, '');
+        const val = authMatch[1].trim().replace(/^Bearer\s+/i, '');
+        const jwt = decodeJwt(val);
+        if (jwt && jwt.exp && jwt.exp > nowSec) {
+          memoryAccessToken = val;
+        }
       }
       const refMatch = envContent.match(/^(?:CRAZII_REFRESH_TOKEN|REFRESH_TOKEN)=(.*)$/m);
       if (refMatch && refMatch[1].trim() && !refMatch[1].includes('PLACEHOLDER')) {
-        memoryRefreshToken = refMatch[1].trim().replace(/^Bearer\s+/i, '');
+        const val = refMatch[1].trim().replace(/^Bearer\s+/i, '');
+        const jwt = decodeJwt(val);
+        if (jwt && jwt.exp && jwt.exp > nowSec) {
+          memoryRefreshToken = val;
+        }
       }
       const devMatch = envContent.match(/^(?:CRAZII_DEVICE_ID|DEVICE_ID)=(.*)$/m);
       if (devMatch && devMatch[1].trim() && !devMatch[1].includes('PLACEHOLDER')) {
         memoryDeviceId = devMatch[1].trim();
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   if (!memoryAccessToken) {
-    memoryAccessToken = (process.env.CRAZII_ACCESS_TOKEN || process.env.CRAZII_AUTH_TOKEN || process.env.AUTH_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
+    const envVal = (process.env.CRAZII_ACCESS_TOKEN || process.env.CRAZII_AUTH_TOKEN || process.env.AUTH_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
+    const jwt = decodeJwt(envVal);
+    if (jwt && jwt.exp && jwt.exp > nowSec) {
+      memoryAccessToken = envVal;
+    } else if (envVal && !envVal.includes('PLACEHOLDER')) {
+      delete process.env.CRAZII_ACCESS_TOKEN;
+      delete process.env.CRAZII_AUTH_TOKEN;
+      delete process.env.AUTH_TOKEN;
+    }
   }
   if (!memoryRefreshToken) {
-    memoryRefreshToken = (process.env.CRAZII_REFRESH_TOKEN || process.env.REFRESH_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
+    const envVal = (process.env.CRAZII_REFRESH_TOKEN || process.env.REFRESH_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
+    const jwt = decodeJwt(envVal);
+    if (jwt && jwt.exp && jwt.exp > nowSec) {
+      memoryRefreshToken = envVal;
+    } else if (envVal && !envVal.includes('PLACEHOLDER')) {
+      console.log(`[Token ENV] ⚠️ Render/System ENV token is expired (${jwt?.exp ? jwt.exp - nowSec : 0}s). Expired ENV token purged. Will prioritize loading fresh token from Database.`);
+      delete process.env.CRAZII_REFRESH_TOKEN;
+      delete process.env.REFRESH_TOKEN;
+    }
   }
   if (!memoryDeviceId || memoryDeviceId.includes('PLACEHOLDER')) {
     memoryDeviceId = (process.env.CRAZII_DEVICE_ID || process.env.DEVICE_ID || 'fb70bf82-5d83-4c70-b7e6-9896bda770e7').trim();
@@ -844,7 +873,7 @@ async function getSystemSetting(key) {
         .eq('key', key)
         .maybeSingle();
       if (!error && data) return data.value;
-    } catch (e) {}
+    } catch (e) { }
   }
   return null;
 }
@@ -871,7 +900,7 @@ async function saveSystemSetting(key, value) {
         .from('system_settings')
         .upsert({ key, value: String(value), updated_at: new Date().toISOString() });
       return !error;
-    } catch (e) {}
+    } catch (e) { }
   }
   return false;
 }
@@ -880,9 +909,16 @@ async function loadTokensFromDb() {
   try {
     const dbRefreshToken = await getSystemSetting('crazii_refresh_token');
     if (dbRefreshToken && !dbRefreshToken.includes('PLACEHOLDER')) {
-      memoryRefreshToken = dbRefreshToken;
-      process.env.CRAZII_REFRESH_TOKEN = dbRefreshToken;
-      console.log(`[Token DB] 🔑 Loaded Crazii Refresh Token from Database!`);
+      const dbJwt = decodeJwt(dbRefreshToken);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const isExpired = Boolean(dbJwt && dbJwt.exp && dbJwt.exp <= nowSec);
+      if (!isExpired) {
+        memoryRefreshToken = dbRefreshToken;
+        process.env.CRAZII_REFRESH_TOKEN = dbRefreshToken;
+        console.log(`[Token DB] 🔑 Loaded Crazii Refresh Token from Database! (Expires in ~${dbJwt?.exp ? Math.round((dbJwt.exp - nowSec) / 3600) + 'h' : 'active'})`);
+      } else {
+        console.log(`[Token DB] ⚠️ Refresh Token in Database is expired (${dbJwt?.exp ? dbJwt.exp - nowSec : 0}s).`);
+      }
     } else if (memoryRefreshToken && !memoryRefreshToken.includes('PLACEHOLDER')) {
       const jwt = decodeJwt(memoryRefreshToken);
       const nowSec = Math.floor(Date.now() / 1000);
@@ -929,7 +965,7 @@ function updateEnvTokens({ authToken, refreshToken }) {
         if (ok) {
           console.log(`[Token DB] 💾 Successfully saved new Access Token to Database!`);
         }
-      }).catch(() => {});
+      }).catch(() => { });
 
       if (/^CRAZII_ACCESS_TOKEN=/m.test(content)) {
         content = content.replace(/^CRAZII_ACCESS_TOKEN=.*$/m, `CRAZII_ACCESS_TOKEN=${cleanAuth}`);
@@ -951,7 +987,7 @@ function updateEnvTokens({ authToken, refreshToken }) {
         if (ok) {
           console.log(`[Token DB] 💾 Successfully saved new Refresh Token to Database!`);
         }
-      }).catch(() => {});
+      }).catch(() => { });
 
       if (/^CRAZII_REFRESH_TOKEN=/m.test(content)) {
         content = content.replace(/^CRAZII_REFRESH_TOKEN=.*$/m, `CRAZII_REFRESH_TOKEN=${cleanRefresh}`);
@@ -975,7 +1011,7 @@ function updateEnvTokens({ authToken, refreshToken }) {
 }
 
 // Prepare Next.js App
-nextApp.prepare().then(() => {
+nextApp.prepare().then(async () => {
   const app = express();
   const server = http.createServer(app);
 
@@ -1000,20 +1036,6 @@ nextApp.prepare().then(() => {
    * Core Function: Execute Refresh Token with Crazii API using the 3-day Refresh Token
    */
   async function executeRefreshToken(customRefreshToken = null, force = false) {
-    const nowMs = Date.now();
-    // Guard against rapid-fire refresh loops (minimum 10s cooldown)
-    if (force && (nowMs - lastRefreshTimestamp < 10000)) {
-      console.log(`[Token Refresh] ⏳ Refresh requested too soon (${Math.round((nowMs - lastRefreshTimestamp) / 1000)}s ago). Reusing active token.`);
-      const currentAuth = getActiveAuthToken();
-      return {
-        success: true,
-        token: currentAuth,
-        accessToken: currentAuth,
-        accessPayload: decodeJwt(currentAuth),
-        refreshPayload: decodeJwt(getActiveRefreshToken())
-      };
-    }
-
     // If no custom token is passed and force is false, check if the current token is still valid (> 2 minutes left)
     if (!customRefreshToken && !force) {
       const currentAuth = getActiveAuthToken();
@@ -1036,12 +1058,30 @@ nextApp.prepare().then(() => {
     }
 
     inFlightRefreshPromise = (async () => {
-      const refreshToken = (customRefreshToken || getActiveRefreshToken()).replace(/^Bearer\s+/i, '').trim();
+      let refreshToken = customRefreshToken;
+      if (!refreshToken) {
+        // ALWAYS check Database first to ensure any manual or external DB update is picked up immediately
+        try {
+          const dbRef = await getSystemSetting('crazii_refresh_token');
+          if (dbRef && !dbRef.includes('PLACEHOLDER')) {
+            const dbJwt = decodeJwt(dbRef);
+            const nowSec = Math.floor(Date.now() / 1000);
+            const isExpired = Boolean(dbJwt && dbJwt.exp && dbJwt.exp <= nowSec);
+            if (!isExpired) {
+              memoryRefreshToken = dbRef.trim();
+              process.env.CRAZII_REFRESH_TOKEN = dbRef.trim();
+            }
+          }
+        } catch (e) { }
+        refreshToken = getActiveRefreshToken();
+      }
+
+      refreshToken = (refreshToken || '').replace(/^Bearer\s+/i, '').trim();
       const deviceId = getActiveDeviceId();
 
       if (!refreshToken || refreshToken.includes('PLACEHOLDER')) {
-        console.warn(`[Token Refresh] ❌ No valid REFRESH_TOKEN found to generate new Access Token.`);
-        return { success: false, message: 'No valid Refresh Token configured. Please set REFRESH_TOKEN in .env or UI.' };
+        console.warn(`[Token Refresh] ❌ No valid REFRESH_TOKEN found in Database or ENV to generate new Access Token.`);
+        return { success: false, message: 'No valid Refresh Token found. Please update crazii_refresh_token in Database.' };
       }
 
       const targetUrl = 'https://sale-api.crazii.com/api/v1/users/refresh-token';
@@ -1054,9 +1094,9 @@ nextApp.prepare().then(() => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0'
       };
 
-      console.log(`[Token Refresh] 🔄 Refreshing 15-minute Access Token using 3-day Refresh Token...`);
+      console.log(`[Token Refresh] 🔄 Refreshing 15-minute Access Token using 3-day Refresh Token (Source: ${refreshToken === customRefreshToken ? 'Custom' : 'Database/Memory'})...`);
       try {
-        const response = await fetch(targetUrl, {
+        let response = await fetch(targetUrl, {
           method: 'POST',
           headers: headers,
           body: JSON.stringify({ token: refreshToken })
@@ -1065,7 +1105,33 @@ nextApp.prepare().then(() => {
         if (!response.ok) {
           const errText = await response.text();
           console.warn(`[Token Refresh] ❌ Crazii API rejected refresh request (${response.status}): ${errText}`);
-          return { success: false, status: response.status, message: 'Refresh Token rejected by Crazii', raw: errText };
+
+          // Automatic Recovery: If current token was rejected, check if DB has a newer/different token!
+          try {
+            const latestDbToken = await getSystemSetting('crazii_refresh_token');
+            if (latestDbToken && latestDbToken.trim() !== refreshToken && !latestDbToken.includes('PLACEHOLDER')) {
+              const latestJwt = decodeJwt(latestDbToken);
+              const nowSec = Math.floor(Date.now() / 1000);
+              const isExpired = Boolean(latestJwt && latestJwt.exp && latestJwt.exp <= nowSec);
+              if (!isExpired) {
+                console.log(`[Token Refresh] 🔄 Found newer valid Refresh Token in Database! Retrying refresh with DB token...`);
+                memoryRefreshToken = latestDbToken.trim();
+                process.env.CRAZII_REFRESH_TOKEN = latestDbToken.trim();
+                response = await fetch(targetUrl, {
+                  method: 'POST',
+                  headers: headers,
+                  body: JSON.stringify({ token: latestDbToken.trim().replace(/^Bearer\s+/i, '') })
+                });
+              }
+            }
+          } catch (retryErr) {
+            console.warn(`[Token Refresh Retry Notice]:`, retryErr.message);
+          }
+
+          if (!response.ok) {
+            const finalErrText = await response.text().catch(() => errText);
+            return { success: false, status: response.status, message: 'Refresh Token rejected by Crazii', raw: finalErrText };
+          }
         }
 
         const data = await response.json();
@@ -1125,6 +1191,24 @@ nextApp.prepare().then(() => {
 
   // Background Scheduler: Proactively auto-refresh Access Token every 30s only when <= 2 minutes left
   setInterval(async () => {
+    // 1. Check if DB was updated externally
+    try {
+      const dbRef = await getSystemSetting('crazii_refresh_token');
+      if (dbRef && dbRef.trim() !== memoryRefreshToken.trim() && !dbRef.includes('PLACEHOLDER')) {
+        const dbJwt = decodeJwt(dbRef);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const isExpired = Boolean(dbJwt && dbJwt.exp && dbJwt.exp <= nowSec);
+        if (!isExpired) {
+          console.log(`[Auto-Refresher] 🔄 Detected fresh Refresh Token in Database! Syncing into memory & refreshing...`);
+          memoryRefreshToken = dbRef.trim();
+          process.env.CRAZII_REFRESH_TOKEN = dbRef.trim();
+          await executeRefreshToken(dbRef.trim(), true);
+          return;
+        }
+      }
+    } catch (e) { }
+
+    // 2. Refresh Access Token before expiration
     const currentAuth = getActiveAuthToken();
     const jwt = decodeJwt(currentAuth);
     const nowSec = Math.floor(Date.now() / 1000);
@@ -1166,70 +1250,70 @@ nextApp.prepare().then(() => {
   // AUTHENTICATION & OTP EMAIL VERIFICATION
   // ==========================================
 
-// Password Hashing & Verification (scrypt + salt)
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derivedKey = crypto.scryptSync(password, salt, 64);
-  return `${salt}:${derivedKey.toString('hex')}`;
-}
-
-function verifyPassword(password, storedHash) {
-  if (!storedHash || typeof storedHash !== 'string' || !storedHash.includes(':')) return false;
-  try {
-    const [salt, key] = storedHash.split(':');
-    const keyBuffer = Buffer.from(key, 'hex');
+  // Password Hashing & Verification (scrypt + salt)
+  function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString('hex');
     const derivedKey = crypto.scryptSync(password, salt, 64);
-    return crypto.timingSafeEqual(keyBuffer, derivedKey);
-  } catch (e) {
-    return false;
-  }
-}
-
-// Mail Transporter & OTP Dispatcher
-let mailTransporter = null;
-function getMailTransporter() {
-  if (mailTransporter) return mailTransporter;
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    mailTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '465', 10),
-      secure: parseInt(process.env.SMTP_PORT || '465', 10) === 465,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  } else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-    mailTransporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
-  }
-  return mailTransporter;
-}
-
-async function sendOtpEmail(toEmail, otpCode) {
-  console.log(`\n======================================================`);
-  console.log(`📧 [EMAIL OTP VERIFICATION] To: ${toEmail}`);
-  console.log(`🔑 Verification Code (15-min expiry): >>> [ ${otpCode} ] <<<`);
-  console.log(`======================================================\n`);
-
-  const transporter = getMailTransporter();
-  if (!transporter) {
-    console.log(`[Email Service] ℹ️ SMTP not configured in .env. Code logged to server console above.`);
-    return { sent: false, code: otpCode };
+    return `${salt}:${derivedKey.toString('hex')}`;
   }
 
-  try {
-    const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
-    await transporter.sendMail({
-      from: `"TRADEWH Trading" <${fromSender}>`,
-      to: toEmail,
-      subject: `[TRADEWH] Mã xác thực tài khoản của bạn: ${otpCode}`,
-      html: `
+  function verifyPassword(password, storedHash) {
+    if (!storedHash || typeof storedHash !== 'string' || !storedHash.includes(':')) return false;
+    try {
+      const [salt, key] = storedHash.split(':');
+      const keyBuffer = Buffer.from(key, 'hex');
+      const derivedKey = crypto.scryptSync(password, salt, 64);
+      return crypto.timingSafeEqual(keyBuffer, derivedKey);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Mail Transporter & OTP Dispatcher
+  let mailTransporter = null;
+  function getMailTransporter() {
+    if (mailTransporter) return mailTransporter;
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      mailTransporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || '465', 10),
+        secure: parseInt(process.env.SMTP_PORT || '465', 10) === 465,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+    } else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+      mailTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.GMAIL_USER,
+          pass: process.env.GMAIL_APP_PASSWORD,
+        },
+      });
+    }
+    return mailTransporter;
+  }
+
+  async function sendOtpEmail(toEmail, otpCode) {
+    console.log(`\n======================================================`);
+    console.log(`📧 [EMAIL OTP VERIFICATION] To: ${toEmail}`);
+    console.log(`🔑 Verification Code (15-min expiry): >>> [ ${otpCode} ] <<<`);
+    console.log(`======================================================\n`);
+
+    const transporter = getMailTransporter();
+    if (!transporter) {
+      console.log(`[Email Service] ℹ️ SMTP not configured in .env. Code logged to server console above.`);
+      return { sent: false, code: otpCode };
+    }
+
+    try {
+      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
+      await transporter.sendMail({
+        from: `"TRADEWH Trading" <${fromSender}>`,
+        to: toEmail,
+        subject: `[TRADEWH] Mã xác thực tài khoản của bạn: ${otpCode}`,
+        html: `
         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; background: #161922; color: #ffffff; padding: 30px; border-radius: 12px; border: 1px solid #252a38;">
           <h2 style="color: #d4af37; margin-top: 0; text-align: center;">Xác Thực Tài Khoản TRADEWH</h2>
           <p style="color: #a0aec0; font-size: 14px; text-align: center;">Mã xác thực 6 chữ số để kích hoạt tài khoản của bạn:</p>
@@ -1239,40 +1323,40 @@ async function sendOtpEmail(toEmail, otpCode) {
           <p style="color: #718096; font-size: 12px; text-align: center;">Mã này có hiệu lực trong vòng <strong>15 phút</strong>. Vui lòng không chia sẻ mã này cho bất kỳ ai.</p>
         </div>
       `,
-    });
-    console.log(`[Email Service] ✅ Successfully sent verification email to ${toEmail}`);
-    return { sent: true };
-  } catch (err) {
-    console.error(`[Email Service Error] Failed to send email to ${toEmail}:`, err.message);
-    return { sent: false, error: err.message };
-  }
-}
-
-// In-Memory Pending Registration & Password Reset Caches (15-min TTL)
-const pendingRegistrations = new Map(); // cleanEmail -> { otp, passwordHash, expiresAt, createdAt }
-const pendingPasswordResets = new Map(); // cleanEmail -> { otp, expiresAt, createdAt } (legacy OTP fallback)
-const pendingMagicResetTokens = new Map(); // token -> { email, expiresAt, createdAt } (Magic Link)
-
-async function sendForgotPasswordMagicLinkEmail(toEmail, resetLink) {
-  console.log(`\n======================================================`);
-  console.log(`🔗 [MAGIC LINK PASSWORD RESET] To: ${toEmail}`);
-  console.log(`👉 Reset Link (15-min expiry):`);
-  console.log(`   ${resetLink}`);
-  console.log(`======================================================\n`);
-
-  const transporter = getMailTransporter();
-  if (!transporter) {
-    console.log(`[Email Service] ℹ️ SMTP not configured in .env. Magic Link logged to server console above.`);
-    return { sent: false, link: resetLink };
+      });
+      console.log(`[Email Service] ✅ Successfully sent verification email to ${toEmail}`);
+      return { sent: true };
+    } catch (err) {
+      console.error(`[Email Service Error] Failed to send email to ${toEmail}:`, err.message);
+      return { sent: false, error: err.message };
+    }
   }
 
-  try {
-    const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
-    await transporter.sendMail({
-      from: `"TRADEWH Trading" <${fromSender}>`,
-      to: toEmail,
-      subject: `[TRADEWH] Đặt lại mật khẩu của bạn`,
-      html: `
+  // In-Memory Pending Registration & Password Reset Caches (15-min TTL)
+  const pendingRegistrations = new Map(); // cleanEmail -> { otp, passwordHash, expiresAt, createdAt }
+  const pendingPasswordResets = new Map(); // cleanEmail -> { otp, expiresAt, createdAt } (legacy OTP fallback)
+  const pendingMagicResetTokens = new Map(); // token -> { email, expiresAt, createdAt } (Magic Link)
+
+  async function sendForgotPasswordMagicLinkEmail(toEmail, resetLink) {
+    console.log(`\n======================================================`);
+    console.log(`🔗 [MAGIC LINK PASSWORD RESET] To: ${toEmail}`);
+    console.log(`👉 Reset Link (15-min expiry):`);
+    console.log(`   ${resetLink}`);
+    console.log(`======================================================\n`);
+
+    const transporter = getMailTransporter();
+    if (!transporter) {
+      console.log(`[Email Service] ℹ️ SMTP not configured in .env. Magic Link logged to server console above.`);
+      return { sent: false, link: resetLink };
+    }
+
+    try {
+      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
+      await transporter.sendMail({
+        from: `"TRADEWH Trading" <${fromSender}>`,
+        to: toEmail,
+        subject: `[TRADEWH] Đặt lại mật khẩu của bạn`,
+        html: `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #1C212D; color: #E9E6E7; padding: 36px; border-radius: 0px; border: 1px solid #6B7C98;">
           <div style="text-align: center; margin-bottom: 24px;">
             <div style="display: inline-block; background: #5E5653; color: #E9E6E7; font-weight: bold; font-size: 14px; letter-spacing: 2px; padding: 6px 20px; border: 1px solid #CBB193;">
@@ -1303,34 +1387,34 @@ async function sendForgotPasswordMagicLinkEmail(toEmail, resetLink) {
           </p>
         </div>
       `,
-    });
-    console.log(`[Email Service] ✅ Successfully sent Magic Link email to ${toEmail}`);
-    return { sent: true };
-  } catch (err) {
-    console.error(`[Email Service Error] Failed to send Magic Link email to ${toEmail}:`, err.message);
-    return { sent: false, error: err.message };
-  }
-}
-
-async function sendForgotPasswordEmail(toEmail, otpCode) {
-  console.log(`\n======================================================`);
-  console.log(`🔑 [FORGOT PASSWORD OTP] To: ${toEmail}`);
-  console.log(`🔐 Reset Code (15-min expiry): >>> [ ${otpCode} ] <<<`);
-  console.log(`======================================================\n`);
-
-  const transporter = getMailTransporter();
-  if (!transporter) {
-    console.log(`[Email Service] ℹ️ SMTP not configured in .env. Reset code logged to server console above.`);
-    return { sent: false, code: otpCode };
+      });
+      console.log(`[Email Service] ✅ Successfully sent Magic Link email to ${toEmail}`);
+      return { sent: true };
+    } catch (err) {
+      console.error(`[Email Service Error] Failed to send Magic Link email to ${toEmail}:`, err.message);
+      return { sent: false, error: err.message };
+    }
   }
 
-  try {
-    const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
-    await transporter.sendMail({
-      from: `"TRADEWH Trading" <${fromSender}>`,
-      to: toEmail,
-      subject: `[TRADEWH] Mã khôi phục mật khẩu của bạn: ${otpCode}`,
-      html: `
+  async function sendForgotPasswordEmail(toEmail, otpCode) {
+    console.log(`\n======================================================`);
+    console.log(`🔑 [FORGOT PASSWORD OTP] To: ${toEmail}`);
+    console.log(`🔐 Reset Code (15-min expiry): >>> [ ${otpCode} ] <<<`);
+    console.log(`======================================================\n`);
+
+    const transporter = getMailTransporter();
+    if (!transporter) {
+      console.log(`[Email Service] ℹ️ SMTP not configured in .env. Reset code logged to server console above.`);
+      return { sent: false, code: otpCode };
+    }
+
+    try {
+      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
+      await transporter.sendMail({
+        from: `"TRADEWH Trading" <${fromSender}>`,
+        to: toEmail,
+        subject: `[TRADEWH] Mã khôi phục mật khẩu của bạn: ${otpCode}`,
+        html: `
         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; background: #161922; color: #ffffff; padding: 30px; border-radius: 12px; border: 1px solid #252a38;">
           <h2 style="color: #d4af37; margin-top: 0; text-align: center;">Khôi Phục Mật Khẩu TRADEWH</h2>
           <p style="color: #a0aec0; font-size: 14px; text-align: center;">Mã xác thực 6 chữ số để đặt lại mật khẩu cho tài khoản của bạn:</p>
@@ -1340,14 +1424,14 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           <p style="color: #718096; font-size: 12px; text-align: center;">Mã này có hiệu lực trong vòng <strong>15 phút</strong>. Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này.</p>
         </div>
       `,
-    });
-    console.log(`[Email Service] ✅ Successfully sent password reset email to ${toEmail}`);
-    return { sent: true };
-  } catch (err) {
-    console.error(`[Email Service Error] Failed to send password reset email to ${toEmail}:`, err.message);
-    return { sent: false, error: err.message };
+      });
+      console.log(`[Email Service] ✅ Successfully sent password reset email to ${toEmail}`);
+      return { sent: true };
+    } catch (err) {
+      console.error(`[Email Service Error] Failed to send password reset email to ${toEmail}:`, err.message);
+      return { sent: false, error: err.message };
+    }
   }
-}
 
 
 
@@ -2016,7 +2100,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         for (const s of sockets) {
           try {
             s.disconnect(true);
-          } catch (e) {}
+          } catch (e) { }
         }
         activeUserSockets.delete(uId);
       }
@@ -2058,10 +2142,10 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
         prisma.user.update({
           where: { id: targetUserId },
           data: { subscription_status: false }
-        }).catch(() => {});
+        }).catch(() => { });
       }
       if (supabaseServer && targetUserId) {
-        supabaseServer.from('users').update({ subscription_status: false }).eq('id', targetUserId).catch(() => {});
+        supabaseServer.from('users').update({ subscription_status: false }).eq('id', targetUserId).catch(() => { });
       }
     }
 
@@ -2222,7 +2306,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           await supabaseServer.from('subscription_orders').update({
             status: 'cancelled'
           }).eq('user_id', userId).in('status', ['waiting', 'pending']);
-        } catch (e) {}
+        } catch (e) { }
       }
 
       console.log(`[Subscription Cancel] 🛑 Cancelled subscription for: ${emailToCancel} (Requested by: ${user.email})`);
@@ -2783,7 +2867,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           let meta = {};
           try {
             meta = typeof additional_data === 'string' ? JSON.parse(additional_data) : (additional_data || {});
-          } catch (e) {}
+          } catch (e) { }
 
           const result = await processSuccessfulPayment({
             orderId: order_id,
@@ -3277,7 +3361,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           const setting = await prisma.systemSetting.findUnique({ where: { key: 'crazii_tokens_updated_at' } });
           dbTokenUpdated = setting ? setting.value : null;
         }
-      } catch (e) {}
+      } catch (e) { }
 
       return res.json({
         success: true,
@@ -3395,7 +3479,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
             isDisabled,
             isAdmin,
             isActive: isSubActive,
-            daysLeft: u.subscription_expiry ? Math.max(0, Math.ceil((new Date(u.subscription_expiry).getTime() - Date.now()) / (24*3600*1000))) : 0
+            daysLeft: u.subscription_expiry ? Math.max(0, Math.ceil((new Date(u.subscription_expiry).getTime() - Date.now()) / (24 * 3600 * 1000))) : 0
           };
         }),
         total,
@@ -3611,7 +3695,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           if (settingRef && settingRef.value) {
             dbRefreshTokenSnippet = settingRef.value.slice(0, 12) + '...' + settingRef.value.slice(-8);
           }
-        } catch (e) {}
+        } catch (e) { }
       }
 
       return res.json({
@@ -3842,7 +3926,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
 
       if (response.status === 401) {
         console.warn(`[REST 401] Token rejected. Attempting auto refresh-token...`);
-        const refreshResult = await executeRefreshToken();
+        const refreshResult = await executeRefreshToken(null, true);
         if (refreshResult.success) {
           authToken = refreshResult.accessToken || refreshResult.token;
           headers['Authorization'] = `Bearer ${authToken}`;
@@ -3863,7 +3947,7 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
           status: response.status,
           statusText: response.statusText,
           message: isUpstreamAuth
-            ? 'Unauthorized: Token Crazii Upstream đã hết hạn hoặc không hợp lệ. Vui lòng vào Quản Trị (/admin/tokens) để cập nhật Token mới.'
+            ? 'Unauthorized: Token Crazii Upstream đã hết hạn hoặc không hợp lệ. Vui lòng cập nhật crazii_refresh_token trong Database.'
             : `Target API Error: ${response.statusText}`,
           raw: errorText
         });
@@ -4004,9 +4088,9 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       io.emit('upstream_status', { connected: false, error: err.message });
 
       const isAuthErr = err.message && (
-        err.message.includes('401') || 
-        err.message.includes('403') || 
-        err.message.toLowerCase().includes('unauthorized') || 
+        err.message.includes('401') ||
+        err.message.includes('403') ||
+        err.message.toLowerCase().includes('unauthorized') ||
         err.message.toLowerCase().includes('forbidden')
       );
 
@@ -4277,8 +4361,8 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
     return handle(req, res);
   });
 
-  // Startup Token Verification (Loads from PostgreSQL DB first, then verifies & refreshes if needed)
-  (async () => {
+  // Startup Token Verification: Load and verify tokens from PostgreSQL DB before listening
+  try {
     await loadTokensFromDb();
     const auth = getActiveAuthToken();
     const jwt = decodeJwt(auth);
@@ -4287,7 +4371,9 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
       console.log(`[Startup] Access token is missing or expiring soon. Verifying Refresh Token...`);
       await executeRefreshToken();
     }
-  })();
+  } catch (startupTokenErr) {
+    console.warn(`[Startup Token Notice]:`, startupTokenErr.message);
+  }
 
   // Listen on PORT
   server.listen(PORT, (err) => {

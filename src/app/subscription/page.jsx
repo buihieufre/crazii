@@ -59,8 +59,8 @@ function SubscriptionContent() {
   function handleLogout() {
     try {
       const supabase = createSupabaseClient();
-      supabase.auth.signOut().catch(() => {});
-    } catch (e) {}
+      supabase.auth.signOut().catch(() => { });
+    } catch (e) { }
     if (typeof window !== 'undefined') {
       localStorage.removeItem('crazii_session_token');
       localStorage.removeItem('tradewh_session_token');
@@ -104,7 +104,7 @@ function SubscriptionContent() {
         if (data.isActive || data.isAdmin) {
           try {
             localStorage.removeItem('crazii_last_payment_order_id');
-          } catch (e) {}
+          } catch (e) { }
           setMessage(prev => {
             if (prev?.type === 'info' && (prev?.text?.includes('Đang chờ nhận tiền') || prev?.text?.includes('xác nhận giao dịch'))) {
               return null;
@@ -123,7 +123,7 @@ function SubscriptionContent() {
             if (data.isAdmin) parsed.role = 'admin';
             localStorage.setItem('crazii_user', JSON.stringify(parsed));
           }
-        } catch (e) {}
+        } catch (e) { }
       }
     } catch (e) {
       console.error('Failed to fetch subscription status:', e);
@@ -187,7 +187,7 @@ function SubscriptionContent() {
       if (savedTrials) {
         setRecentTrials(JSON.parse(savedTrials));
       }
-    } catch (e) {}
+    } catch (e) { }
     fetchSubscriptionData();
   }, []);
 
@@ -197,7 +197,7 @@ function SubscriptionContent() {
     if (subData?.isActive || subData?.isAdmin) {
       try {
         localStorage.removeItem('crazii_last_payment_order_id');
-      } catch (e) {}
+      } catch (e) { }
       setMessage(prev => {
         if (prev?.type === 'info' && (prev?.text?.includes('Đang chờ nhận tiền') || prev?.text?.includes('xác nhận giao dịch'))) {
           return null;
@@ -212,7 +212,7 @@ function SubscriptionContent() {
       try {
         const savedOrderId = localStorage.getItem('crazii_last_payment_order_id');
         if (savedOrderId) targetOrderId = savedOrderId;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (queryStatus === 'success' || targetOrderId) {
@@ -244,7 +244,7 @@ function SubscriptionContent() {
                   }
                   localStorage.setItem('crazii_user', JSON.stringify(parsed));
                 }
-              } catch (e) {}
+              } catch (e) { }
 
               setMessage({
                 type: 'success',
@@ -257,7 +257,7 @@ function SubscriptionContent() {
               }, 1800);
             } else {
               if (subData?.isActive || subData?.isAdmin) {
-                try { localStorage.removeItem('crazii_last_payment_order_id'); } catch (e) {}
+                try { localStorage.removeItem('crazii_last_payment_order_id'); } catch (e) { }
                 setMessage(null);
               } else {
                 setMessage({
@@ -354,7 +354,7 @@ function SubscriptionContent() {
         setRecentTrials(updatedHistory);
         try {
           localStorage.setItem('tradewh_recent_trials', JSON.stringify(updatedHistory));
-        } catch (e) {}
+        } catch (e) { }
         setMessage({ type: 'success', text: `Đã tạo thành công tài khoản dùng thử ${actualDays} ngày!` });
         setGenNote('');
       } else {
@@ -373,7 +373,7 @@ function SubscriptionContent() {
       setRecentTrials([]);
       try {
         localStorage.removeItem('tradewh_recent_trials');
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 
@@ -448,14 +448,14 @@ function SubscriptionContent() {
         if (data.orderId) {
           try {
             localStorage.setItem('crazii_last_payment_order_id', data.orderId);
-          } catch (e) {}
+          } catch (e) { }
         }
         setPaymentInfo({
           ...data,
           networkName,
           selectedPrice: data.amount || effectivePrice
         });
-        
+
         setMessage({
           type: 'info',
           text: `Đang chuyển sang cổng thanh toán NOWPayments USDT (${networkName}). Sau khi chuyển khoản xong, gói cước sẽ tự động kích hoạt +30 ngày!`
@@ -495,7 +495,7 @@ function SubscriptionContent() {
                     }
                     localStorage.setItem('crazii_user', JSON.stringify(parsed));
                   }
-                } catch (e) {}
+                } catch (e) { }
 
                 setMessage({
                   type: 'success',
@@ -508,7 +508,7 @@ function SubscriptionContent() {
                 }, 1800);
                 return;
               }
-            } catch (e) {}
+            } catch (e) { }
           }
 
           await fetchSubscriptionData();
@@ -563,7 +563,7 @@ function SubscriptionContent() {
             }
             localStorage.setItem('crazii_user', JSON.stringify(parsed));
           }
-        } catch (e) {}
+        } catch (e) { }
 
         setMessage({
           type: 'success',
@@ -619,7 +619,7 @@ function SubscriptionContent() {
             }
             localStorage.setItem('crazii_user', JSON.stringify(parsed));
           }
-        } catch (e) {}
+        } catch (e) { }
 
         setMessage({
           type: 'success',
@@ -658,7 +658,7 @@ function SubscriptionContent() {
     if (isActive || isAdmin) {
       try {
         localStorage.removeItem('crazii_last_payment_order_id');
-      } catch (e) {}
+      } catch (e) { }
       setMessage(prev => {
         if (prev?.type === 'info' && (prev?.text?.includes('Đang chờ nhận tiền') || prev?.text?.includes('xác nhận giao dịch'))) {
           return null;
@@ -675,13 +675,13 @@ function SubscriptionContent() {
 
   const expiryDateFormatted = expiryTime > 0
     ? new Date(expiryTime).toLocaleString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      })
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    })
     : null;
 
   return (
@@ -835,7 +835,7 @@ function SubscriptionContent() {
 
       {/* Main Container */}
       <main style={{ width: '100%', maxWidth: '1040px', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        
+
         {/* Global Notification Banner */}
         {message && (!isActive || message.type !== 'info' || (!message.text.includes('Đang chờ nhận tiền') && !message.text.includes('xác nhận giao dịch'))) && (
           <div style={{
@@ -891,7 +891,7 @@ function SubscriptionContent() {
             }} />
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-              
+
               {/* Status Badge */}
               <div style={{
                 display: 'inline-flex',
@@ -1174,385 +1174,385 @@ function SubscriptionContent() {
         {/* SECTION: PRICING & PAYMENT CHECKOUT (NOWPAYMENTS DIRECT USDT) - ONLY SHOWN WHEN INACTIVE */}
         {!isActive && (
           <div style={{ width: '100%', maxWidth: '820px', marginBottom: '40px' }}>
-          
-          <div style={{
-            background: 'linear-gradient(180deg, #131722 0%, #0D1018 100%)',
-            border: '1px solid #222938',
-            borderRadius: '2px',
-            padding: '32px 28px',
-            position: 'relative'
-          }}>
-            
-            {/* Single Official Subscription Plan Card */}
-            <div style={{ marginBottom: '20px' }}>
-              <div
-                style={{
-                  padding: '20px 24px',
-                  background: 'rgba(203, 177, 147, 0.08)',
-                  border: '1.5px solid #CBB193',
-                  borderRadius: '2px',
-                  boxShadow: '0 4px 20px rgba(203, 177, 147, 0.08)',
-                  position: 'relative'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '20px' }}>💎</span>
-                    <strong style={{ fontSize: '16px', color: '#CBB193', letterSpacing: '0.5px' }}>
-                      Gói TRADEWH Pro (30 Ngày)
-                    </strong>
-                  </div>
-                  <span style={{ fontSize: '10px', color: '#CBB193', fontWeight: '800', background: 'rgba(203, 177, 147, 0.15)', border: '1px solid #CBB193', padding: '3px 8px', borderRadius: '2px' }}>
-                    GÓI CHÍNH THỨC DUY NHẤT
-                  </span>
-                </div>
 
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '32px', fontWeight: '900', color: '#FFFFFF', fontFamily: 'JetBrains Mono, monospace' }}>
-                    $45.00
-                  </span>
-                  <span style={{ fontSize: '13px', color: '#CBB193', fontWeight: '600' }}>
-                    USDT / 30 Ngày
-                  </span>
-                </div>
+            <div style={{
+              background: 'linear-gradient(180deg, #131722 0%, #0D1018 100%)',
+              border: '1px solid #222938',
+              borderRadius: '2px',
+              padding: '32px 28px',
+              position: 'relative'
+            }}>
 
-                <p style={{ fontSize: '12.5px', color: '#A0AEC0', margin: '0 0 12px 0', lineHeight: '1.5' }}>
-                  Toàn quyền truy cập TRADEWH, full hệ thống tín hiệu chỉ báo chuyên sâu (KSI, KCS, Diamond, MA30, MA200, PIVOT, KCB, Màu nến) và tính năng phân tích đa màn hình.
-                </p>
-
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', fontSize: '11.5px', color: '#E9E6E7' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>30 ngày truy cập không giới hạn</span></span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>Toàn bộ thị trường Vàng, Dầu, Crypto, Forex, Cổ phiếu</span></span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>Tự động kích hoạt ngay sau khi chuyển khoản</span></span>
-                </div>
-              </div>
-            </div>
-
-            {/* Network Selection (Tối giản 2 mạng BSC và ETH) */}
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Chọn Mạng Blockchain (USDT):
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
-                
-                {/* Network 1: BSC (BEP-20) */}
+              {/* Single Official Subscription Plan Card */}
+              <div style={{ marginBottom: '20px' }}>
                 <div
-                  onClick={() => setSelectedNetwork('bsc')}
                   style={{
-                    padding: '12px 16px',
-                    background: selectedNetwork === 'bsc' ? 'rgba(240, 185, 11, 0.08)' : '#0E1118',
-                    border: `1.5px solid ${selectedNetwork === 'bsc' ? '#F0B90B' : '#222938'}`,
+                    padding: '20px 24px',
+                    background: 'rgba(203, 177, 147, 0.08)',
+                    border: '1.5px solid #CBB193',
                     borderRadius: '2px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between'
+                    boxShadow: '0 4px 20px rgba(203, 177, 147, 0.08)',
+                    position: 'relative'
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '16px' }}>🟡</span>
-                    <strong style={{ fontSize: '13px', color: selectedNetwork === 'bsc' ? '#F0B90B' : '#E9E6E7' }}>
-                      BNB Smart Chain
-                    </strong>
-                  </div>
-                  <span style={{
-                    fontSize: '10px',
-                    fontWeight: '800',
-                    color: selectedNetwork === 'bsc' ? '#0B0E14' : '#F0B90B',
-                    background: selectedNetwork === 'bsc' ? '#F0B90B' : 'rgba(240, 185, 11, 0.12)',
-                    padding: '2px 6px',
-                    borderRadius: '2px'
-                  }}>
-                    BEP-20
-                  </span>
-                </div>
-
-                {/* Network 2: Ethereum (ERC-20) */}
-                <div
-                  onClick={() => setSelectedNetwork('eth')}
-                  style={{
-                    padding: '12px 16px',
-                    background: selectedNetwork === 'eth' ? 'rgba(98, 126, 234, 0.08)' : '#0E1118',
-                    border: `1.5px solid ${selectedNetwork === 'eth' ? '#627EEA' : '#222938'}`,
-                    borderRadius: '2px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '16px' }}>🔵</span>
-                    <strong style={{ fontSize: '13px', color: selectedNetwork === 'eth' ? '#627EEA' : '#E9E6E7' }}>
-                      Ethereum
-                    </strong>
-                  </div>
-                  <span style={{
-                    fontSize: '10px',
-                    fontWeight: '800',
-                    color: selectedNetwork === 'eth' ? '#FFFFFF' : '#627EEA',
-                    background: selectedNetwork === 'eth' ? '#627EEA' : 'rgba(98, 126, 234, 0.15)',
-                    padding: '2px 6px',
-                    borderRadius: '2px'
-                  }}>
-                    ERC-20
-                  </span>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Active Direct Payment Terminal Widget (Direct QR, Address, Amount) */}
-            {paymentInfo && (
-              <div style={{
-                marginBottom: '28px',
-                padding: '24px 20px',
-                background: '#0B0E14',
-                border: '1.5px solid #00E5FF',
-                borderRadius: '2px',
-                boxShadow: '0 8px 30px rgba(0, 229, 255, 0.08)'
-              }}>
-                {/* Payment Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #1E2536' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '18px' }}>⚡</span>
-                    <strong style={{ fontSize: '15px', color: '#00E5FF', letterSpacing: '-0.3px' }}>
-                      Hóa Đơn Nạp USDT Mạng {paymentInfo.networkName || (selectedNetwork === 'eth' ? 'ETH (ERC-20)' : 'BSC (BEP-20)')}
-                    </strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', color: '#4ADE80', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 8px', borderRadius: '2px', fontWeight: 'bold' }}>
-                      WAITING PAYMENT (POLL #{pollCount})
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '20px' }}>💎</span>
+                      <strong style={{ fontSize: '16px', color: '#CBB193', letterSpacing: '0.5px' }}>
+                        Gói TRADEWH Pro (30 Ngày)
+                      </strong>
+                    </div>
+                    <span style={{ fontSize: '10px', color: '#CBB193', fontWeight: '800', background: 'rgba(203, 177, 147, 0.15)', border: '1px solid #CBB193', padding: '3px 8px', borderRadius: '2px' }}>
+                      GÓI CHÍNH THỨC DUY NHẤT
                     </span>
-                    {paymentInfo.paymentId && (
-                      <span style={{ fontSize: '11px', color: '#6B7C98', fontFamily: 'monospace' }}>
-                        ID: #{paymentInfo.paymentId}
-                      </span>
-                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '32px', fontWeight: '900', color: '#FFFFFF', fontFamily: 'JetBrains Mono, monospace' }}>
+                      $45.00
+                    </span>
+                    <span style={{ fontSize: '13px', color: '#CBB193', fontWeight: '600' }}>
+                      USDT / 30 Ngày
+                    </span>
+                  </div>
+
+                  <p style={{ fontSize: '12.5px', color: '#A0AEC0', margin: '0 0 12px 0', lineHeight: '1.5' }}>
+                    Toàn quyền truy cập TRADEWH, full hệ thống tín hiệu chỉ báo chuyên sâu (KSI, KCS, Diamond, MA30, MA200, PIVOT, KCB, Màu nến) và tính năng phân tích đa màn hình.
+                  </p>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', fontSize: '11.5px', color: '#E9E6E7' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>30 ngày truy cập không giới hạn</span></span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>Toàn bộ thị trường Vàng, Dầu, Crypto, Forex, Cổ phiếu</span></span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>✅ <span>Tự động kích hoạt ngay sau khi chuyển khoản</span></span>
                   </div>
                 </div>
+              </div>
 
-                {/* Main QR & Details Layout */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
-                  
-                  {/* Left: Direct QR Code */}
-                  {paymentInfo.payAddress && (
-                    <div style={{
-                      padding: '10px',
-                      background: '#FFFFFF',
-                      borderRadius: '4px',
+              {/* Network Selection (Tối giản 2 mạng BSC và ETH) */}
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#A0AEC0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Chọn Mạng Blockchain (USDT):
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+
+                  {/* Network 1: BSC (BEP-20) */}
+                  <div
+                    onClick={() => setSelectedNetwork('bsc')}
+                    style={{
+                      padding: '12px 16px',
+                      background: selectedNetwork === 'bsc' ? 'rgba(240, 185, 11, 0.08)' : '#0E1118',
+                      border: `1.5px solid ${selectedNetwork === 'bsc' ? '#F0B90B' : '#222938'}`,
+                      borderRadius: '2px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
                       display: 'flex',
-                      flexDirection: 'column',
                       alignItems: 'center',
-                      boxShadow: '0 4px 15px rgba(0,0,0,0.4)'
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '16px' }}>🟡</span>
+                      <strong style={{ fontSize: '13px', color: selectedNetwork === 'bsc' ? '#F0B90B' : '#E9E6E7' }}>
+                        BNB Smart Chain
+                      </strong>
+                    </div>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      color: selectedNetwork === 'bsc' ? '#0B0E14' : '#F0B90B',
+                      background: selectedNetwork === 'bsc' ? '#F0B90B' : 'rgba(240, 185, 11, 0.12)',
+                      padding: '2px 6px',
+                      borderRadius: '2px'
                     }}>
-                      <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${paymentInfo.payAddress}&margin=2`}
-                        alt="USDT Deposit QR"
-                        style={{ width: '160px', height: '160px', display: 'block' }}
-                      />
-                      <span style={{ fontSize: '10px', color: '#0B0E14', fontWeight: 'bold', marginTop: '4px' }}>
-                        QUÉT MÃ VÍ USDT
-                      </span>
-                    </div>
-                  )}
+                      BEP-20
+                    </span>
+                  </div>
 
-                  {/* Right: Amount & Address Copy Fields */}
-                  <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    
-                    {/* Amount Field */}
-                    <div>
-                      <span style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Số lượng USDT cần chuyển:
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#121620', border: '1px solid #222938', padding: '8px 12px', borderRadius: '2px', marginTop: '4px' }}>
-                        <code style={{ fontSize: '16px', fontWeight: 'bold', color: '#CBB193' }}>
-                          {paymentInfo.payAmount || paymentInfo.selectedPrice} USDT
-                        </code>
-                        <button
-                          onClick={() => handleCopyText(String(paymentInfo.payAmount || paymentInfo.selectedPrice), 'pay_amount')}
-                          style={{
-                            padding: '4px 8px',
-                            background: copiedKey === 'pay_amount' ? 'rgba(74, 222, 128, 0.2)' : '#1E2536',
-                            color: copiedKey === 'pay_amount' ? '#4ADE80' : '#E9E6E7',
-                            border: '1px solid #2A3347',
-                            borderRadius: '2px',
-                            fontSize: '11px',
-                            cursor: 'pointer',
-                            fontWeight: '600'
-                          }}
-                        >
-                          {copiedKey === 'pay_amount' ? '✓ Đã chép' : '📋 Chép Số Tiền'}
-                        </button>
-                      </div>
+                  {/* Network 2: Ethereum (ERC-20) */}
+                  <div
+                    onClick={() => setSelectedNetwork('eth')}
+                    style={{
+                      padding: '12px 16px',
+                      background: selectedNetwork === 'eth' ? 'rgba(98, 126, 234, 0.08)' : '#0E1118',
+                      border: `1.5px solid ${selectedNetwork === 'eth' ? '#627EEA' : '#222938'}`,
+                      borderRadius: '2px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '16px' }}>🔵</span>
+                      <strong style={{ fontSize: '13px', color: selectedNetwork === 'eth' ? '#627EEA' : '#E9E6E7' }}>
+                        Ethereum
+                      </strong>
                     </div>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      color: selectedNetwork === 'eth' ? '#FFFFFF' : '#627EEA',
+                      background: selectedNetwork === 'eth' ? '#627EEA' : 'rgba(98, 126, 234, 0.15)',
+                      padding: '2px 6px',
+                      borderRadius: '2px'
+                    }}>
+                      ERC-20
+                    </span>
+                  </div>
 
-                    {/* Address Field */}
+                </div>
+              </div>
+
+              {/* Active Direct Payment Terminal Widget (Direct QR, Address, Amount) */}
+              {paymentInfo && (
+                <div style={{
+                  marginBottom: '28px',
+                  padding: '24px 20px',
+                  background: '#0B0E14',
+                  border: '1.5px solid #00E5FF',
+                  borderRadius: '2px',
+                  boxShadow: '0 8px 30px rgba(0, 229, 255, 0.08)'
+                }}>
+                  {/* Payment Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #1E2536' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>⚡</span>
+                      <strong style={{ fontSize: '15px', color: '#00E5FF', letterSpacing: '-0.3px' }}>
+                        Hóa Đơn Nạp USDT Mạng {paymentInfo.networkName || (selectedNetwork === 'eth' ? 'ETH (ERC-20)' : 'BSC (BEP-20)')}
+                      </strong>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', color: '#4ADE80', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 8px', borderRadius: '2px', fontWeight: 'bold' }}>
+                        WAITING PAYMENT (POLL #{pollCount})
+                      </span>
+                      {paymentInfo.paymentId && (
+                        <span style={{ fontSize: '11px', color: '#6B7C98', fontFamily: 'monospace' }}>
+                          ID: #{paymentInfo.paymentId}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Main QR & Details Layout */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+
+                    {/* Left: Direct QR Code */}
                     {paymentInfo.payAddress && (
+                      <div style={{
+                        padding: '10px',
+                        background: '#FFFFFF',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        boxShadow: '0 4px 15px rgba(0,0,0,0.4)'
+                      }}>
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${paymentInfo.payAddress}&margin=2`}
+                          alt="USDT Deposit QR"
+                          style={{ width: '160px', height: '160px', display: 'block' }}
+                        />
+                        <span style={{ fontSize: '10px', color: '#0B0E14', fontWeight: 'bold', marginTop: '4px' }}>
+                          QUÉT MÃ VÍ USDT
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Right: Amount & Address Copy Fields */}
+                    <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+
+                      {/* Amount Field */}
                       <div>
                         <span style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                          Địa chỉ ví nhận ({paymentInfo.networkName || 'BSC'}):
+                          Số lượng USDT cần chuyển:
                         </span>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#121620', border: '1px solid #222938', padding: '8px 12px', borderRadius: '2px', marginTop: '4px', gap: '8px' }}>
-                          <code style={{ fontSize: '12px', color: '#00E5FF', wordBreak: 'break-all', fontFamily: 'monospace' }}>
-                            {paymentInfo.payAddress}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#121620', border: '1px solid #222938', padding: '8px 12px', borderRadius: '2px', marginTop: '4px' }}>
+                          <code style={{ fontSize: '16px', fontWeight: 'bold', color: '#CBB193' }}>
+                            {paymentInfo.payAmount || paymentInfo.selectedPrice} USDT
                           </code>
                           <button
-                            onClick={() => handleCopyText(paymentInfo.payAddress, 'pay_addr')}
+                            onClick={() => handleCopyText(String(paymentInfo.payAmount || paymentInfo.selectedPrice), 'pay_amount')}
                             style={{
                               padding: '4px 8px',
-                              background: copiedKey === 'pay_addr' ? 'rgba(74, 222, 128, 0.2)' : '#1E2536',
-                              color: copiedKey === 'pay_addr' ? '#4ADE80' : '#E9E6E7',
+                              background: copiedKey === 'pay_amount' ? 'rgba(74, 222, 128, 0.2)' : '#1E2536',
+                              color: copiedKey === 'pay_amount' ? '#4ADE80' : '#E9E6E7',
                               border: '1px solid #2A3347',
                               borderRadius: '2px',
                               fontSize: '11px',
                               cursor: 'pointer',
-                              fontWeight: '600',
-                              flexShrink: 0
+                              fontWeight: '600'
                             }}
                           >
-                            {copiedKey === 'pay_addr' ? '✓ Đã chép' : '📋 Chép Ví'}
+                            {copiedKey === 'pay_amount' ? '✓ Đã chép' : '📋 Chép Số Tiền'}
                           </button>
                         </div>
                       </div>
-                    )}
 
-                    <div style={{ fontSize: '11px', color: '#A0AEC0', lineHeight: '1.4' }}>
-                      ⚠️ Lưu ý: Chỉ gửi <strong>USDT</strong> qua đúng mạng <strong>{paymentInfo.networkName}</strong>. Hệ thống sẽ tự động bắt giao dịch và kích hoạt tài khoản ngay khi có xác nhận.
+                      {/* Address Field */}
+                      {paymentInfo.payAddress && (
+                        <div>
+                          <span style={{ fontSize: '11px', color: '#6B7C98', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            Địa chỉ ví nhận ({paymentInfo.networkName || 'BSC'}):
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#121620', border: '1px solid #222938', padding: '8px 12px', borderRadius: '2px', marginTop: '4px', gap: '8px' }}>
+                            <code style={{ fontSize: '12px', color: '#00E5FF', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                              {paymentInfo.payAddress}
+                            </code>
+                            <button
+                              onClick={() => handleCopyText(paymentInfo.payAddress, 'pay_addr')}
+                              style={{
+                                padding: '4px 8px',
+                                background: copiedKey === 'pay_addr' ? 'rgba(74, 222, 128, 0.2)' : '#1E2536',
+                                color: copiedKey === 'pay_addr' ? '#4ADE80' : '#E9E6E7',
+                                border: '1px solid #2A3347',
+                                borderRadius: '2px',
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                flexShrink: 0
+                              }}
+                            >
+                              {copiedKey === 'pay_addr' ? '✓ Đã chép' : '📋 Chép Ví'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: '11px', color: '#A0AEC0', lineHeight: '1.4' }}>
+                        ⚠️ Lưu ý: Chỉ gửi <strong>USDT</strong> qua đúng mạng <strong>{paymentInfo.networkName}</strong>. Hệ thống sẽ tự động bắt giao dịch và kích hoạt tài khoản ngay khi có xác nhận.
+                      </div>
+
                     </div>
 
                   </div>
 
+                  {/* Bottom Actions */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', paddingTop: '12px', borderTop: '1px solid #1E2536' }}>
+                    <a
+                      href={paymentInfo.paymentUrl || paymentInfo.invoiceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        flex: '1 1 200px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        padding: '11px 18px',
+                        background: '#00E5FF',
+                        color: '#0B0E14',
+                        textDecoration: 'none',
+                        borderRadius: '2px',
+                        fontSize: '12px',
+                        fontWeight: '800'
+                      }}
+                    >
+                      <span>MỞ TRÊN TRANG NOWPAYMENTS ↗</span>
+                    </a>
+
+                    {/* Active Status Sync Button */}
+                    <button
+                      onClick={handleCheckPaymentStatus}
+                      disabled={checkingStatus}
+                      style={{
+                        flex: '1 1 180px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        padding: '11px 18px',
+                        background: 'rgba(38, 161, 123, 0.2)',
+                        color: '#4ADE80',
+                        border: '1px solid #26A17B',
+                        borderRadius: '2px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: checkingStatus ? 'not-allowed' : 'pointer'
+                      }}
+                      title="Kiểm tra trạng thái xác nhận từ NOWPayments và đồng bộ ngay"
+                    >
+                      <span>{checkingStatus ? '⏳ ĐANG KIỂM TRA...' : '🔄 KIỂM TRA THANH TOÁN (SYNC)'}</span>
+                    </button>
+                  </div>
                 </div>
+              )}
 
-                {/* Bottom Actions */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', paddingTop: '12px', borderTop: '1px solid #1E2536' }}>
-                  <a
-                    href={paymentInfo.paymentUrl || paymentInfo.invoiceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      flex: '1 1 200px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      padding: '11px 18px',
-                      background: '#00E5FF',
-                      color: '#0B0E14',
-                      textDecoration: 'none',
-                      borderRadius: '2px',
-                      fontSize: '12px',
-                      fontWeight: '800'
-                    }}
-                  >
-                    <span>MỞ TRÊN TRANG NOWPAYMENTS ↗</span>
-                  </a>
+              {/* Minimalist Aesthetic Payment Button */}
+              <button
+                onClick={handleCreatePayment}
+                disabled={paying}
+                style={{
+                  width: '100%',
+                  padding: '14px 24px',
+                  background: paying ? '#1E2330' : '#CBB193',
+                  color: paying ? '#787B86' : '#0B0E14',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  fontWeight: '700',
+                  letterSpacing: '0.4px',
+                  cursor: paying ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.15s ease',
+                  boxShadow: paying ? 'none' : '0 2px 10px rgba(203, 177, 147, 0.15)'
+                }}
+                onMouseEnter={(e) => {
+                  if (!paying) {
+                    e.currentTarget.style.background = '#dfc7ab';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!paying) {
+                    e.currentTarget.style.background = '#CBB193';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }
+                }}
+              >
+                {paying ? (
+                  <>
+                    <span>🔄</span>
+                    <span>Đang kết nối cổng thanh toán...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Thanh toán $45 USDT</span>
+                    <span style={{ fontSize: '12.5px', fontWeight: '500', opacity: 0.75 }}>
+                      • {selectedNetwork === 'eth' ? 'ERC-20' : 'BEP-20'}
+                    </span>
+                    <span style={{ fontSize: '15px', marginLeft: '4px' }}>→</span>
+                  </>
+                )}
+              </button>
 
-                  {/* Active Status Sync Button */}
-                  <button
-                    onClick={handleCheckPaymentStatus}
-                    disabled={checkingStatus}
-                    style={{
-                      flex: '1 1 180px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      padding: '11px 18px',
-                      background: 'rgba(38, 161, 123, 0.2)',
-                      color: '#4ADE80',
-                      border: '1px solid #26A17B',
-                      borderRadius: '2px',
-                      fontSize: '12px',
-                      fontWeight: '800',
-                      cursor: checkingStatus ? 'not-allowed' : 'pointer'
-                    }}
-                    title="Kiểm tra trạng thái xác nhận từ NOWPayments và đồng bộ ngay"
-                  >
-                    <span>{checkingStatus ? '⏳ ĐANG KIỂM TRA...' : '🔄 KIỂM TRA THANH TOÁN (SYNC)'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Minimalist Aesthetic Payment Button */}
-            <button
-              onClick={handleCreatePayment}
-              disabled={paying}
-              style={{
-                width: '100%',
-                padding: '14px 24px',
-                background: paying ? '#1E2330' : '#CBB193',
-                color: paying ? '#787B86' : '#0B0E14',
-                border: 'none',
-                borderRadius: '4px',
-                fontSize: '14px',
-                fontWeight: '700',
-                letterSpacing: '0.4px',
-                cursor: paying ? 'not-allowed' : 'pointer',
+              <div style={{
+                marginTop: '10px',
+                fontSize: '12px',
+                color: '#8E9BAE',
+                textAlign: 'center',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '8px',
-                transition: 'all 0.15s ease',
-                boxShadow: paying ? 'none' : '0 2px 10px rgba(203, 177, 147, 0.15)'
-              }}
-              onMouseEnter={(e) => {
-                if (!paying) {
-                  e.currentTarget.style.background = '#dfc7ab';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!paying) {
-                  e.currentTarget.style.background = '#CBB193';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }
-              }}
-            >
-              {paying ? (
-                <>
-                  <span>🔄</span>
-                  <span>Đang kết nối cổng thanh toán...</span>
-                </>
-              ) : (
-                <>
-                  <span>Thanh toán $45 USDT</span>
-                  <span style={{ fontSize: '12.5px', fontWeight: '500', opacity: 0.75 }}>
-                    • {selectedNetwork === 'eth' ? 'ERC-20' : 'BEP-20'}
-                  </span>
-                  <span style={{ fontSize: '15px', marginLeft: '4px' }}>→</span>
-                </>
-              )}
-            </button>
+                gap: '6px'
+              }}>
+                <span>ℹ️</span>
+                <span>Bạn sẽ được chuyển hướng sang trang khác để thanh toán</span>
+              </div>
 
-            <div style={{
-              marginTop: '10px',
-              fontSize: '12px',
-              color: '#8E9BAE',
-              textAlign: 'center',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px'
-            }}>
-              <span>ℹ️</span>
-              <span>Bạn sẽ được chuyển hướng sang trang khác để thanh toán</span>
+              <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', fontSize: '11px', color: '#6B7C98' }}>
+                <span>🔒 Cổng bảo mật NOWPayments</span>
+                <span>•</span>
+                <span>⚡ Mạng {selectedNetwork === 'eth' ? 'Ethereum (ERC-20)' : 'BNB Smart Chain (BEP-20)'}</span>
+                <span>•</span>
+                <span>💬 Hỗ trợ Telegram: <a href="https://t.me/tradewh04" target="_blank" rel="noopener noreferrer" style={{ color: '#00E5FF', textDecoration: 'none' }}>@tradewh04</a></span>
+              </div>
+
             </div>
-
-            <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', fontSize: '11px', color: '#6B7C98' }}>
-              <span>🔒 Cổng bảo mật NOWPayments</span>
-              <span>•</span>
-              <span>⚡ Mạng {selectedNetwork === 'eth' ? 'Ethereum (ERC-20)' : 'BNB Smart Chain (BEP-20)'}</span>
-              <span>•</span>
-              <span>💬 Hỗ trợ Telegram: <a href="https://t.me/tradewh04" target="_blank" rel="noopener noreferrer" style={{ color: '#00E5FF', textDecoration: 'none' }}>@tradewh04</a></span>
-            </div>
-
           </div>
-        </div>
         )}
 
       </main>

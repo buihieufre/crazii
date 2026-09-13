@@ -4,7 +4,11 @@ export function decodeJwt(token) {
   const parts = clean.split('.');
   if (parts.length < 2) return null;
   try {
-    const payloadStr = Buffer.from(parts[1], 'base64').toString('utf8');
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) {
+      base64 += '=';
+    }
+    const payloadStr = Buffer.from(base64, 'base64').toString('utf8');
     const parsed = JSON.parse(payloadStr);
     if (parsed && typeof parsed === 'object') {
       delete parsed.upn;
@@ -13,6 +17,40 @@ export function decodeJwt(token) {
   } catch (e) {
     return null;
   }
+}
+
+export async function getValidRefreshToken() {
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // 1. ALWAYS query Database first (Supabase REST) as primary source of truth
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://wlhlspmruezijcghgtqx.supabase.co';
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_6Atv2XIec0c5qV75FTEWCg_gNLh7tDw';
+    const res = await fetch(`${supabaseUrl}/rest/v1/system_settings?key=eq.crazii_refresh_token&select=value`, {
+      headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows && rows[0] && rows[0].value) {
+        const dbToken = rows[0].value.replace(/^Bearer\s+/i, '').trim();
+        const dbJwt = decodeJwt(dbToken);
+        const isExpired = Boolean(dbJwt && dbJwt.exp && dbJwt.exp <= nowSec);
+        if (!isExpired && !dbToken.includes('PLACEHOLDER')) {
+          process.env.CRAZII_REFRESH_TOKEN = dbToken;
+          return dbToken;
+        }
+      }
+    }
+  } catch (e) { }
+
+  // 2. Fallback to Environment Variables only if valid and not expired
+  const envToken = (process.env.CRAZII_REFRESH_TOKEN || process.env.REFRESH_TOKEN || '').replace(/^Bearer\s+/i, '').trim();
+  const envJwt = decodeJwt(envToken);
+  if (envJwt && envJwt.exp && envJwt.exp > nowSec && !envToken.includes('PLACEHOLDER')) {
+    return envToken;
+  }
+
+  return envToken;
 }
 
 export function getRefreshToken() {
@@ -52,11 +90,11 @@ export async function executeRefreshToken(force = false) {
   }
 
   inFlightRefreshPromise = (async () => {
-    const refreshToken = getRefreshToken();
+    const refreshToken = await getValidRefreshToken();
     const deviceId = getDeviceId();
 
     if (!refreshToken || refreshToken.includes('PLACEHOLDER')) {
-      return { success: false, message: 'No valid Refresh Token configured in Environment Variables.' };
+      return { success: false, message: 'No valid Refresh Token found in Database or Environment Variables.' };
     }
 
     const targetUrl = 'https://sale-api.crazii.com/api/v1/users/refresh-token';
@@ -99,6 +137,34 @@ export async function executeRefreshToken(force = false) {
       // In memory update for the current serverless instance
       process.env.CRAZII_ACCESS_TOKEN = newAccessToken;
       if (newRefreshToken) process.env.CRAZII_REFRESH_TOKEN = newRefreshToken;
+
+      // Persist to Supabase PostgreSQL DB asynchronously
+      try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://wlhlspmruezijcghgtqx.supabase.co';
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_6Atv2XIec0c5qV75FTEWCg_gNLh7tDw';
+        if (newRefreshToken) {
+          fetch(`${supabaseUrl}/rest/v1/system_settings`, {
+            method: 'POST',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'resolution=merge-duplicates'
+            },
+            body: JSON.stringify({ key: 'crazii_refresh_token', value: newRefreshToken, updated_at: new Date().toISOString() })
+          }).catch(() => { });
+        }
+        fetch(`${supabaseUrl}/rest/v1/system_settings`, {
+          method: 'POST',
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify({ key: 'crazii_access_token', value: newAccessToken, updated_at: new Date().toISOString() })
+        }).catch(() => { });
+      } catch (e) { }
 
       const decodedAccess = decodeJwt(newAccessToken);
       const decodedRefresh = decodeJwt(newRefreshToken || refreshToken);

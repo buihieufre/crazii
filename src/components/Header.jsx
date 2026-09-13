@@ -65,7 +65,7 @@ export default function Header({
     try {
       const raw = localStorage.getItem('crazii_user');
       if (raw) effectiveUser = JSON.parse(raw);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const isAdmin = Boolean(
@@ -199,7 +199,7 @@ export default function Header({
         {/* Brand & Symbol & Timeframe Selection (Visible on Desktop & Mobile) */}
         <div className="brand-section">
           <div className="brand-logo">TRADEWH<span>.COM</span></div>
-          
+
           {/* Symbol Pill with Icon -> click to open Asset Selector */}
           <div
             className="symbol-pill"
@@ -327,7 +327,7 @@ export default function Header({
             {isLayoutMenuOpen && (
               <div className="layout-dropdown-menu">
                 <div className="layout-dropdown-header">Bố cục biểu đồ</div>
-                
+
                 <div
                   className={`layout-option-item ${activeLayout === '1' ? 'active' : ''}`}
                   onClick={() => { onSelectLayout?.('1'); setIsLayoutMenuOpen(false); }}
@@ -765,7 +765,7 @@ export default function Header({
 
         {/* Drawer Scrollable Content */}
         <div className="mobile-drawer-body">
-          
+
           {/* Group 1: Layout Selection */}
           <div className="mobile-drawer-group">
             <div className="mobile-group-title">
@@ -870,7 +870,7 @@ export default function Header({
                 <span>👑</span>
                 <span>QUẢN TRỊ VIÊN</span>
               </div>
-              
+
               <Link
                 href="/admin"
                 className="mobile-admin-btn"
@@ -899,68 +899,68 @@ export default function Header({
                 <span>GÓI THÀNH VIÊN PRO</span>
               </div>
 
-            {isSubscribed ? (
-              <div
-                style={{
-                  padding: '12px',
-                  background: 'rgba(34, 197, 94, 0.08)',
-                  border: '1px solid rgba(34, 197, 94, 0.25)',
-                  borderRadius: '4px',
-                  color: '#4ADE80',
-                  fontSize: '12px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px'
-                }}
-              >
-                <div style={{ fontWeight: '800' }}>✅ Gói Pro Đang Hoạt Động</div>
-                <div style={{ fontSize: '11px', color: '#A0AEC0' }}>
-                  {planName} {expiryFormatted ? `• Hạn: ${expiryFormatted} (${daysLeft} ngày)` : ''}
+              {isSubscribed ? (
+                <div
+                  style={{
+                    padding: '12px',
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.25)',
+                    borderRadius: '4px',
+                    color: '#4ADE80',
+                    fontSize: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px'
+                  }}
+                >
+                  <div style={{ fontWeight: '800' }}>✅ Gói Pro Đang Hoạt Động</div>
+                  <div style={{ fontSize: '11px', color: '#A0AEC0' }}>
+                    {planName} {expiryFormatted ? `• Hạn: ${expiryFormatted} (${daysLeft} ngày)` : ''}
+                  </div>
                 </div>
-              </div>
-            ) : isExpired ? (
-              <Link
-                href="/subscription"
-                className="mobile-admin-btn"
-                onClick={() => setIsMobileDrawerOpen(false)}
-                style={{
-                  textDecoration: 'none',
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  borderColor: 'rgba(239, 68, 68, 0.35)',
-                  color: '#F87171',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  fontWeight: '700'
-                }}
-              >
-                <span>⏳</span>
-                <span>Gói Cước Đã Hết Hạn - Gia Hạn Ngay</span>
-              </Link>
-            ) : (
-              <Link
-                href="/subscription"
-                className="mobile-admin-btn"
-                onClick={() => setIsMobileDrawerOpen(false)}
-                style={{
-                  textDecoration: 'none',
-                  background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
-                  borderColor: 'rgba(203, 177, 147, 0.45)',
-                  color: '#CBB193',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  fontWeight: '700'
-                }}
-              >
-                <span>💎</span>
-                <span>Chưa Kích Hoạt - Đăng Ký Gói Pro</span>
-              </Link>
-            )}
-          </div>
-        )}
+              ) : isExpired ? (
+                <Link
+                  href="/subscription"
+                  className="mobile-admin-btn"
+                  onClick={() => setIsMobileDrawerOpen(false)}
+                  style={{
+                    textDecoration: 'none',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    borderColor: 'rgba(239, 68, 68, 0.35)',
+                    color: '#F87171',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    fontWeight: '700'
+                  }}
+                >
+                  <span>⏳</span>
+                  <span>Gói Cước Đã Hết Hạn - Gia Hạn Ngay</span>
+                </Link>
+              ) : (
+                <Link
+                  href="/subscription"
+                  className="mobile-admin-btn"
+                  onClick={() => setIsMobileDrawerOpen(false)}
+                  style={{
+                    textDecoration: 'none',
+                    background: 'linear-gradient(135deg, rgba(203, 177, 147, 0.18) 0%, rgba(171, 151, 140, 0.08) 100%)',
+                    borderColor: 'rgba(203, 177, 147, 0.45)',
+                    color: '#CBB193',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    fontWeight: '700'
+                  }}
+                >
+                  <span>💎</span>
+                  <span>Chưa Kích Hoạt - Đăng Ký Gói Pro</span>
+                </Link>
+              )}
+            </div>
+          )}
 
           {/* Group 6: Logout Button (Elevated with bottom padding for mobile safe area) */}
           <div className="mobile-logout-wrapper">
