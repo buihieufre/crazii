@@ -1308,7 +1308,7 @@ nextApp.prepare().then(async () => {
     }
 
     try {
-      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
+      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.work';
       await transporter.sendMail({
         from: `"TRADEWH Trading" <${fromSender}>`,
         to: toEmail,
@@ -1351,7 +1351,7 @@ nextApp.prepare().then(async () => {
     }
 
     try {
-      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
+      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.work';
       await transporter.sendMail({
         from: `"TRADEWH Trading" <${fromSender}>`,
         to: toEmail,
@@ -1409,7 +1409,7 @@ nextApp.prepare().then(async () => {
     }
 
     try {
-      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.com';
+      const fromSender = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || 'no-reply@tradewh.work';
       await transporter.sendMail({
         from: `"TRADEWH Trading" <${fromSender}>`,
         to: toEmail,
@@ -1708,10 +1708,8 @@ nextApp.prepare().then(async () => {
       createdAt: Date.now()
     });
 
-    // Build absolute Magic Link URL
-    const reqProto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    const reqHost = req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`;
-    const origin = req.headers.origin || `${reqProto}://${reqHost}`;
+    // Build absolute Magic Link URL using configured APP_URL or request origin
+    const origin = getAppBaseUrl(req);
     const magicLink = `${origin}/?reset_token=${token}&email=${encodeURIComponent(cleanEmail)}`;
 
     await sendForgotPasswordMagicLinkEmail(cleanEmail, magicLink);
@@ -3192,7 +3190,7 @@ nextApp.prepare().then(async () => {
     while (!isUnique && attempts < 10) {
       attempts++;
       const randomHex = crypto.randomBytes(3).toString('hex'); // 6 random characters
-      generatedEmail = `${cleanPrefix}_${randomHex}@tradewh.com`;
+      generatedEmail = `${cleanPrefix}_${randomHex}@tradewh.work`;
       const existing = await findUserByEmail(generatedEmail);
       if (!existing) {
         isUnique = true;

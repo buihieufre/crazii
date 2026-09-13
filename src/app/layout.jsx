@@ -1,6 +1,7 @@
 import './globals.css';
 
 export const metadata = {
+  metadataBase: new URL('https://tradewh.work'),
   title: 'TRADEWH',
   description: 'Next.js Pro Trading Terminal with TradingView Lightweight Charts and WebSocket streaming',
   icons: {

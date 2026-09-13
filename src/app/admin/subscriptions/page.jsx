@@ -303,10 +303,10 @@ export default function AdminSubscriptionsPage() {
                   outline: 'none'
                 }}
               >
-                <option value="trial">trial_xxxxxx@tradewh.com</option>
-                <option value="vip">vip_xxxxxx@tradewh.com</option>
-                <option value="guest">guest_xxxxxx@tradewh.com</option>
-                <option value="demo">demo_xxxxxx@tradewh.com</option>
+                <option value="trial">trial_xxxxxx@tradewh.work</option>
+                <option value="vip">vip_xxxxxx@tradewh.work</option>
+                <option value="guest">guest_xxxxxx@tradewh.work</option>
+                <option value="demo">demo_xxxxxx@tradewh.work</option>
               </select>
             </div>
 
@@ -396,7 +396,8 @@ export default function AdminSubscriptionsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  const copyFormat = `🚀 TÀI KHOẢN DÙNG THỬ TRADEWH PRO (${latestCreatedAccount.days} NGÀY)\nEmail: ${latestCreatedAccount.email}\nMật khẩu: ${latestCreatedAccount.password}\nThời hạn: ${latestCreatedAccount.days} ngày (Hết hạn: ${latestCreatedAccount.expiryDateFormatted})\nĐăng nhập tại: https://tradewh.com\nChúc bạn có trải nghiệm phân tích tuyệt vời!`;
+                  const loginUrl = typeof window !== 'undefined' ? window.location.origin : 'https://tradewh.work';
+                  const copyFormat = `🚀 TÀI KHOẢN DÙNG THỬ TRADEWH PRO (${latestCreatedAccount.days} NGÀY)\nEmail: ${latestCreatedAccount.email}\nMật khẩu: ${latestCreatedAccount.password}\nThời hạn: ${latestCreatedAccount.days} ngày (Hết hạn: ${latestCreatedAccount.expiryDateFormatted})\nĐăng nhập tại: ${loginUrl}\nChúc bạn có trải nghiệm phân tích tuyệt vời!`;
                   handleCopyText(copyFormat, 'created_acc');
                 }}
                 style={{

@@ -310,7 +310,7 @@ function SubscriptionContent() {
     return [
       `🌟 THÔNG TIN TÀI KHOẢN TRẢI NGHIỆM TRADEWH PRO 🌟`,
       `━━━━━━━━━━━━━━━━━━━━━━`,
-      `🌐 Link đăng nhập: https://crazii.onrender.com/`,
+      `🌐 Link đăng nhập: ${typeof window !== 'undefined' ? window.location.origin : 'https://tradewh.work'}/`,
       `👤 Tài khoản: ${acc.email}`,
       `🔑 Mật khẩu: ${acc.password}`,
       `⏱️ Thời hạn: ${acc.days} Ngày (Hết hạn: ${acc.expiryDateFormatted || acc.subscriptionExpiry})`,
