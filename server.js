@@ -3806,12 +3806,14 @@ async function sendForgotPasswordEmail(toEmail, otpCode) {
 
       if (!response.ok) {
         const errorText = await response.text();
-        return res.status(response.status).json({
+        const isUpstreamAuth = response.status === 401;
+        return res.status(isUpstreamAuth ? 502 : response.status).json({
           success: false,
+          code: isUpstreamAuth ? 'UPSTREAM_TOKEN_EXPIRED' : 'UPSTREAM_API_ERROR',
           status: response.status,
           statusText: response.statusText,
-          message: response.status === 401
-            ? 'Unauthorized: Token expired or invalid. Please click 🔑 Token to refresh or update.'
+          message: isUpstreamAuth
+            ? 'Unauthorized: Token Crazii Upstream đã hết hạn hoặc không hợp lệ. Vui lòng vào Quản Trị (/admin/tokens) để cập nhật Token mới.'
             : `Target API Error: ${response.statusText}`,
           raw: errorText
         });

@@ -449,7 +449,10 @@ export default function TerminalPage() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.status === 401) {
-        handleLogout();
+        const data = await res.json().catch(() => ({}));
+        if (data.code === 'UNAUTHORIZED' || data.code === 'INVALID_SESSION' || data.code === 'DEVICE_SESSION_TERMINATED') {
+          handleLogout();
+        }
         return;
       }
       if (!res.ok) return;
@@ -479,8 +482,25 @@ export default function TerminalPage() {
           const msg = errorData.message || 'Tài khoản của bạn đã được đăng nhập trên một thiết bị khác. Phiên làm việc này đã kết thúc.';
           setKickoutMessage(msg);
           setIsKickoutModalOpen(true);
+          handleLogout();
+          return;
         }
-        handleLogout();
+        if (errorData.code === 'UNAUTHORIZED' || errorData.code === 'INVALID_SESSION') {
+          handleLogout();
+          return;
+        }
+        // If it is not a user session termination, do NOT log out!
+        return;
+      }
+
+      if (res.status === 502 || res.status === 503) {
+        const errorData = await res.json().catch(() => ({}));
+        if (!isSilent && slotIndex === 0) {
+          setNotification({
+            type: 'warning',
+            message: 'Dữ liệu nến tạm dừng (Token Upstream Crazii đã hết hạn). Quản trị viên vui lòng vào /admin/tokens để cập nhật Token mới.'
+          });
+        }
         return;
       }
 

@@ -46,15 +46,17 @@ export async function GET(request) {
 
     if (!response.ok) {
       const errorText = await response.text();
+      const isUpstreamAuth = response.status === 401;
       return NextResponse.json({
         success: false,
+        code: isUpstreamAuth ? 'UPSTREAM_TOKEN_EXPIRED' : 'UPSTREAM_API_ERROR',
         status: response.status,
         statusText: response.statusText,
-        message: response.status === 401
-          ? 'Unauthorized: Token expired or invalid. Please check your CRAZII_REFRESH_TOKEN in Environment Variables.'
+        message: isUpstreamAuth
+          ? 'Unauthorized: Token Crazii Upstream đã hết hạn hoặc không hợp lệ. Vui lòng vào Quản Trị (/admin/tokens) để cập nhật Token mới.'
           : `Target API Error: ${response.statusText}`,
         raw: errorText
-      }, { status: response.status });
+      }, { status: isUpstreamAuth ? 502 : response.status });
     }
 
     const data = await response.json();
