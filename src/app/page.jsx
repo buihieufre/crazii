@@ -73,6 +73,7 @@ export default function TerminalPage() {
   const chartRefs = [chartRef0, chartRef1, chartRef2, chartRef3];
 
   const socketRef = useRef(null);
+  const subscribedChannelsRef = useRef(new Set());
 
   // Initial state (defaults to BTCUSD_5)
   const [activeSymbolObj, setActiveSymbolObj] = useState(() => getSymbolByCode('BTCUSD'));
@@ -395,21 +396,37 @@ export default function TerminalPage() {
     }
   }, []);
 
-  // Helper to subscribe visible slot codes on active socket connection
+  // Helper to synchronize visible slot codes on active socket connection
   const subscribeVisibleSlots = useCallback(() => {
     if (!socketRef.current || !socketRef.current.connected) return;
-    const count = activeLayoutRef.current === '1' ? 1 : (activeLayoutRef.current.startsWith('2') ? 2 : (activeLayoutRef.current.startsWith('3') ? 3 : 4));
-    for (let i = 0; i < count; i++) {
+    const layout = activeLayoutRef.current || '1';
+    const visibleCount = layout === '1' ? 1 : (layout.startsWith('2') ? 2 : (layout.startsWith('3') ? 3 : 4));
+
+    const desiredChannels = new Set();
+    desiredChannels.add('price');
+
+    for (let i = 0; i < visibleCount; i++) {
       const slot = slotsRef.current[i];
       if (slot && slot.code) {
-        socketRef.current.emit('subscribe', slot.code);
-        const sym = slot.code.split('_')[0];
-        if (sym && sym !== slot.code) {
-          socketRef.current.emit('subscribe', sym);
-        }
+        desiredChannels.add(slot.code.trim());
       }
     }
-    socketRef.current.emit('subscribe', 'price');
+
+    // 1. Unsubscribe any channels that are no longer visible on screen
+    subscribedChannelsRef.current.forEach((chan) => {
+      if (!desiredChannels.has(chan)) {
+        socketRef.current.emit('unsubscribe', chan);
+        subscribedChannelsRef.current.delete(chan);
+      }
+    });
+
+    // 2. Subscribe newly visible channels
+    desiredChannels.forEach((chan) => {
+      if (!subscribedChannelsRef.current.has(chan)) {
+        socketRef.current.emit('subscribe', chan);
+        subscribedChannelsRef.current.add(chan);
+      }
+    });
   }, []);
 
   // Fullscreen event listener
@@ -498,8 +515,7 @@ export default function TerminalPage() {
           }
 
           if (socketRef.current && socketRef.current.connected) {
-            socketRef.current.emit('subscribe', codeToFetch);
-            socketRef.current.emit('subscribe', 'price');
+            subscribeVisibleSlots();
           }
 
           // If cache was saved less than 15s ago, skip network request entirely
@@ -647,8 +663,7 @@ export default function TerminalPage() {
       }
 
       if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('subscribe', codeToFetch);
-        socketRef.current.emit('subscribe', 'price');
+        subscribeVisibleSlots();
       }
     } catch (err) {
       if (!isSilent && !isBackgroundRevalidation) {
@@ -1101,6 +1116,7 @@ export default function TerminalPage() {
         socket.on('connect', () => {
           setWsStatus('live');
           setNotification(null);
+          subscribedChannelsRef.current.clear();
           subscribeVisibleSlots();
         });
 
@@ -1240,6 +1256,7 @@ export default function TerminalPage() {
     return () => {
       clearInterval(pollInterval);
       if (socket) {
+        subscribedChannelsRef.current.clear();
         socket.removeAllListeners();
         socket.disconnect();
       }

@@ -4017,7 +4017,9 @@ nextApp.prepare().then(async () => {
       activeChannels.forEach(channel => {
         targetSocket.emit('subscribe', channel);
       });
-      targetSocket.emit('subscribe', 'price');
+      if (!activeChannels.has('price')) {
+        targetSocket.emit('subscribe', 'price');
+      }
       io.emit('upstream_status', { connected: true, timestamp: Date.now() });
     });
 
@@ -4033,7 +4035,9 @@ nextApp.prepare().then(async () => {
         activeChannels.forEach(channel => {
           targetSocket.emit('subscribe', channel);
         });
-        targetSocket.emit('subscribe', 'price');
+        if (!activeChannels.has('price')) {
+          targetSocket.emit('subscribe', 'price');
+        }
         io.emit('upstream_status', { connected: true, timestamp: Date.now() });
       });
 
@@ -4315,6 +4319,7 @@ nextApp.prepare().then(async () => {
           connectUpstreamWebSocket();
         } else if (isFirstSub || cleanChan.toLowerCase() === 'price') {
           targetSocket.emit('subscribe', cleanChan);
+          console.log(`[WS Relay] ➕ Subscribed upstream: ${cleanChan} (Active: [${Array.from(activeChannels).join(', ')}])`);
         }
       }
     });
@@ -4325,6 +4330,7 @@ nextApp.prepare().then(async () => {
         const shouldUnsubUpstream = removeClientSubscription(cleanChan, clientSocket.id);
         if (shouldUnsubUpstream && targetSocket && targetSocket.connected) {
           targetSocket.emit('unsubscribe', cleanChan);
+          console.log(`[WS Relay] ⏹️ Unsubscribed upstream: ${cleanChan} (Active: [${Array.from(activeChannels).join(', ')}])`);
         }
         if (activeChannels.size === 0 && botMonitoredChannels.size === 0) {
           disconnectUpstreamWebSocket();

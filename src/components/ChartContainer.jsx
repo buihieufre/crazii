@@ -1132,8 +1132,19 @@ const ChartContainer = forwardRef(function ChartContainer(
       }
       if (!candleSeriesRef.current) return;
 
-      // Keep chart canvas dimmed / low-opacity while injecting data & calculating scales
-      if (containerRef.current) {
+      // AUTO-FIT ONLY ON INITIAL LOAD OR ASSET/TIMEFRAME SWITCH
+      const shouldAutoFit = Boolean(isInitial || needsAutoFitRef.current);
+
+      // Preserve current user scroll position / zoom level if this is an in-place update/refresh
+      let savedLogicalRange = null;
+      if (!shouldAutoFit && chartRef.current) {
+        try {
+          savedLogicalRange = chartRef.current.timeScale().getVisibleLogicalRange();
+        } catch (e) {}
+      }
+
+      // Only dim during initial layout calculation of a NEW asset/timeframe
+      if (shouldAutoFit && containerRef.current) {
         containerRef.current.style.opacity = '0.05';
       }
 
@@ -1341,8 +1352,7 @@ const ChartContainer = forwardRef(function ChartContainer(
         }
       }
 
-      // AUTO-FIT ON DATASET LOAD (ALWAYS auto-fit on timeframe or asset switch to eliminate giant stretched single candles)
-      const shouldAutoFit = true;
+      // Auto-fit on initial load or asset switch ONLY
       if (shouldAutoFit && chartRef.current) {
         needsAutoFitRef.current = false;
         try {
@@ -1392,6 +1402,11 @@ const ChartContainer = forwardRef(function ChartContainer(
           chartRef.current.timeScale().fitContent();
           chartRef.current.timeScale().scrollToRealtime();
         } catch (e) {}
+      } else if (savedLogicalRange && chartRef.current) {
+        // Keep candle positions perfectly in place on dataset update
+        try {
+          chartRef.current.timeScale().setVisibleLogicalRange(savedLogicalRange);
+        } catch (e) {}
       }
 
       requestAnimationFrame(() => {
@@ -1400,7 +1415,7 @@ const ChartContainer = forwardRef(function ChartContainer(
         updatePaneHeaderPositions();
         applySolidPaneStyles(chartRef.current?.panes());
         redrawDrawings();
-        if (chartRef.current) {
+        if (shouldAutoFit && chartRef.current) {
           try {
             if (candleSeriesRef.current) {
               candleSeriesRef.current.priceScale().applyOptions({ autoScale: true });
@@ -1411,6 +1426,10 @@ const ChartContainer = forwardRef(function ChartContainer(
             }
             chartRef.current.timeScale().fitContent();
             chartRef.current.timeScale().scrollToRealtime();
+          } catch (e) {}
+        } else if (savedLogicalRange && chartRef.current) {
+          try {
+            chartRef.current.timeScale().setVisibleLogicalRange(savedLogicalRange);
           } catch (e) {}
         }
       });
@@ -1436,6 +1455,12 @@ const ChartContainer = forwardRef(function ChartContainer(
             containerRef.current.style.opacity = '1';
           }
         }, 60);
+      } else {
+        // In-place data update: zero delay, keep canvas visible and steady
+        setIsDataLoading(false);
+        if (containerRef.current) {
+          containerRef.current.style.opacity = '1';
+        }
       }
     },
 
@@ -1760,7 +1785,7 @@ const ChartContainer = forwardRef(function ChartContainer(
         horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
       },
       crosshair: {
-        mode: 1,
+        mode: LightweightCharts.CrosshairMode ? LightweightCharts.CrosshairMode.Normal : 0,
         vertLine: { color: '#ffffff', width: 1, style: 2, labelBackgroundColor: '#2962FF' },
         horzLine: { color: '#ffffff', width: 1, style: 2, labelBackgroundColor: '#2962FF' },
       },
@@ -1908,10 +1933,7 @@ const ChartContainer = forwardRef(function ChartContainer(
 
       // Broadcast to other visible charts
       if (onSyncCrosshair) {
-        let price = candle?.close;
-        if ((price === undefined || isNaN(price)) && param.point) {
-          price = cSeries.coordinateToPrice(param.point.y);
-        }
+        let price = param.point ? cSeries.coordinateToPrice(param.point.y) : candle?.close;
         onSyncCrosshair(param.time, price, slotIndex);
       }
     };

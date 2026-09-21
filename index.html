@@ -1286,6 +1286,7 @@
     let activePriceLines = [];
     let localSocket = null;
     let currentLatestCandle = null;
+    let activeSubscribedCode = null;
 
     // --- Color Constants ---
     const BULLISH_COLOR = '#FFEB3B'; // Yellow
@@ -1331,7 +1332,7 @@
           horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
         },
         crosshair: {
-          mode: 1,
+          mode: 0,
           vertLine: { color: '#ffffff', width: 1, style: 2, labelBackgroundColor: '#2962FF' },
           horzLine: { color: '#ffffff', width: 1, style: 2, labelBackgroundColor: '#2962FF' },
         },
@@ -1784,11 +1785,8 @@
         banner.style.display = 'none';
         processAndRenderDataset(list);
 
-        // Tell local WebSocket to subscribe to this channel
-        if (localSocket && localSocket.connected) {
-          localSocket.emit('subscribe', currentCode);
-          localSocket.emit('subscribe', 'price');
-        }
+        // Tell local WebSocket to subscribe ONLY to this active channel
+        syncWebSocketSubscription();
       } catch (err) {
         console.error('Fetch error:', err);
         banner.className = 'error';
@@ -1846,10 +1844,19 @@
         }
       }
 
+      function syncWebSocketSubscription() {
+        if (!localSocket || !localSocket.connected) return;
+        if (activeSubscribedCode && activeSubscribedCode !== currentCode) {
+          localSocket.emit('unsubscribe', activeSubscribedCode);
+        }
+        localSocket.emit('subscribe', currentCode);
+        localSocket.emit('subscribe', 'price');
+        activeSubscribedCode = currentCode;
+      }
+
       localSocket.on('connect', () => {
         updateWsUI('live', 'WS Live');
-        localSocket.emit('subscribe', 'price');
-        localSocket.emit('subscribe', currentCode);
+        syncWebSocketSubscription();
       });
 
       // Socket.IO client auto-reconnect events
@@ -1860,8 +1867,7 @@
 
         localSocket.io.on('reconnect', (attempt) => {
           updateWsUI('live', 'WS Live');
-          localSocket.emit('subscribe', 'price');
-          localSocket.emit('subscribe', currentCode);
+          syncWebSocketSubscription();
           // Auto-resync chart dataset to ensure no missing candles during disconnect
           fetchChartData();
         });
