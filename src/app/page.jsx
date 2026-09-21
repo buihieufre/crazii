@@ -16,6 +16,7 @@ import { calculateBarCountdown } from '@/lib/utils';
 import { updateHeaderCountdown } from '@/lib/ohlc-updater';
 import { getSymbolByCode } from '@/lib/assets-data';
 import { getDefaultTimezone } from '@/lib/timezones';
+import { getCachedCandles, setCachedCandles } from '@/lib/candle-cache';
 
 export default function TerminalPage() {
   // Google & Supabase Sign-In Barrier Authentication State
@@ -469,8 +470,51 @@ export default function TerminalPage() {
     const token = getSessionToken();
     if (!token) return;
 
-    if (!isSilent) setIsRefreshing(true);
     let loadedSuccessfully = false;
+
+    // 1. Instant Persistent Cache Check (Stale-While-Revalidate pattern)
+    let hasRenderedFromCache = false;
+    try {
+      const cached = await getCachedCandles(codeToFetch);
+      if (cached && Array.isArray(cached.list) && cached.list.length > 0) {
+        let targetChartRef = chartRefs[slotIndex];
+        let waitCount = 0;
+        while ((!targetChartRef || !targetChartRef.current) && waitCount < 6) {
+          await new Promise((r) => setTimeout(r, 40));
+          targetChartRef = chartRefs[slotIndex];
+          waitCount++;
+        }
+        if (targetChartRef && targetChartRef.current) {
+          // Instant 0ms render from persistent cache!
+          targetChartRef.current.renderDataset(cached.list, isInitial);
+          hasRenderedFromCache = true;
+          loadedSuccessfully = true;
+
+          if (isInitial && slotIndex === 0) {
+            setTimeout(() => {
+              setIsChartReady(true);
+              setIsCheckingAuth(false);
+            }, 40);
+          }
+
+          if (socketRef.current && socketRef.current.connected) {
+            socketRef.current.emit('subscribe', codeToFetch);
+            socketRef.current.emit('subscribe', 'price');
+          }
+
+          // If cache was saved less than 15s ago, skip network request entirely
+          if (cached.ageMs < 15000 && !isInitial) {
+            return;
+          }
+        }
+      }
+    } catch (cErr) {
+      console.warn('[Cache] Instant load warning:', cErr);
+    }
+
+    // If we already showed cached data, run network revalidation silently in background
+    const isBackgroundRevalidation = hasRenderedFromCache;
+    if (!isSilent && !isBackgroundRevalidation) setIsRefreshing(true);
 
     try {
       let res = await fetch(`/api/candles?code=${encodeURIComponent(codeToFetch)}`, {
@@ -504,7 +548,7 @@ export default function TerminalPage() {
 
       if (res.status === 502 || res.status === 503) {
         const errorData = await res.json().catch(() => ({}));
-        if (!isSilent && slotIndex === 0) {
+        if (!isSilent && !isBackgroundRevalidation && slotIndex === 0) {
           setNotification({
             type: 'warning',
             message: 'Dữ liệu nến tạm dừng (Token Upstream Crazii đã hết hạn). Quản trị viên vui lòng cập nhật crazii_refresh_token trong Database.'
@@ -516,7 +560,7 @@ export default function TerminalPage() {
       if (res.status === 403) {
         const errorData = await res.json().catch(() => ({}));
         if (errorData.code === 'SUBSCRIPTION_REQUIRED') {
-          if (!isSilent) {
+          if (!isSilent && !isBackgroundRevalidation) {
             setNotification({
               type: 'error',
               message: 'Tài khoản cần kích hoạt gói Subscription để sử dụng biểu đồ.'
@@ -535,7 +579,7 @@ export default function TerminalPage() {
       const contentType = res.headers.get('content-type') || '';
 
       if (!contentType.includes('application/json')) {
-        if (!isSilent) {
+        if (!isSilent && !isBackgroundRevalidation) {
           setNotification({
             type: 'error',
             message: `API trả về phản hồi không hợp lệ (${res.status}). Vui lòng kiểm tra biến môi trường CRAZII_REFRESH_TOKEN trên Vercel / Server.`
@@ -547,7 +591,7 @@ export default function TerminalPage() {
       const result = await res.json();
 
       if (!res.ok) {
-        if (!isSilent) {
+        if (!isSilent && !isBackgroundRevalidation) {
           const isProxyErr = result.message === 'Proxy fetch error';
           const causeInfo = result.cause ? ` (${result.cause})` : (result.error ? ` (${result.error})` : '');
           const errorMsg = isProxyErr
@@ -568,7 +612,7 @@ export default function TerminalPage() {
       else if (result.success && Array.isArray(result.result)) list = result.result;
 
       if (list.length === 0) {
-        if (!isSilent) {
+        if (!isSilent && !isBackgroundRevalidation) {
           setNotification({
             type: 'info',
             message: `Received 0 candle records for ${codeToFetch}.`
@@ -576,6 +620,9 @@ export default function TerminalPage() {
         }
         return;
       }
+
+      // Save fresh data into persistent cache
+      setCachedCandles(codeToFetch, list);
 
       setNotification(null);
 
@@ -588,7 +635,7 @@ export default function TerminalPage() {
       }
 
       if (targetChartRef && targetChartRef.current) {
-        targetChartRef.current.renderDataset(list, isInitial);
+        targetChartRef.current.renderDataset(list, isInitial && !hasRenderedFromCache);
         loadedSuccessfully = true;
         if (isInitial && slotIndex === 0) {
           setTimeout(() => {
@@ -603,14 +650,14 @@ export default function TerminalPage() {
         socketRef.current.emit('subscribe', 'price');
       }
     } catch (err) {
-      if (!isSilent) {
+      if (!isSilent && !isBackgroundRevalidation) {
         setNotification({
           type: 'error',
           message: `Lỗi kết nối API: ${err.message}`
         });
       }
     } finally {
-      if (!isSilent) setIsRefreshing(false);
+      if (!isSilent && !isBackgroundRevalidation) setIsRefreshing(false);
       if (!loadedSuccessfully) {
         chartRefs[slotIndex]?.current?.setLoading(false);
       }
