@@ -58,9 +58,9 @@ export default function TerminalPage() {
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'idle'
   const isHydratedRef = useRef(false);
 
-  // 4 Chart Slot configurations
+  // 4 Chart Slot configurations (default to BTCUSD_5 if first time opening)
   const [slots, setSlots] = useState([
-    { id: 0, code: null, symbolObj: null, tfName: '5m', tfMinutes: 5 },
+    { id: 0, code: 'BTCUSD_5', symbolObj: null, tfName: '5m', tfMinutes: 5 },
     { id: 1, code: null, symbolObj: null, tfName: '15m', tfMinutes: 15 },
     { id: 2, code: null, symbolObj: null, tfName: '1D', tfMinutes: 1440 },
     { id: 3, code: null, symbolObj: null, tfName: '5m', tfMinutes: 5 },
@@ -74,9 +74,9 @@ export default function TerminalPage() {
 
   const socketRef = useRef(null);
 
-  // Standby initial state
-  const [activeSymbolObj, setActiveSymbolObj] = useState(null);
-  const [currentCode, setCurrentCode] = useState(null);
+  // Initial state (defaults to BTCUSD_5)
+  const [activeSymbolObj, setActiveSymbolObj] = useState(() => getSymbolByCode('BTCUSD'));
+  const [currentCode, setCurrentCode] = useState('BTCUSD_5');
   const [timeframeLabel, setTimeframeLabel] = useState('5m');
   const [timeframeMinutes, setTimeframeMinutes] = useState(5);
   const [wsStatus, setWsStatus] = useState('idle'); // 'idle' | 'live' | 'cloud' | 'reconnecting' | 'disconnected'
@@ -595,8 +595,9 @@ export default function TerminalPage() {
           const isProxyErr = result.message === 'Proxy fetch error';
           const causeInfo = result.cause ? ` (${result.cause})` : (result.error ? ` (${result.error})` : '');
           const errorMsg = isProxyErr
-            ? `Lỗi kết nối máy chủ Crazii (${codeToFetch})${causeInfo}. Vui lòng thử lại.`
+            ? `Lỗi kết nối máy chủ Crazii (${codeToFetch})${causeInfo}.`
             : `API (${codeToFetch}): ${result.message || 'Lỗi tải dữ liệu nến'}`;
+          chartRefs[slotIndex]?.current?.setError(errorMsg);
           setNotification({
             type: 'error',
             message: errorMsg
@@ -651,9 +652,11 @@ export default function TerminalPage() {
       }
     } catch (err) {
       if (!isSilent && !isBackgroundRevalidation) {
+        const errorMsg = `Lỗi kết nối API (${codeToFetch}): ${err.message}`;
+        chartRefs[slotIndex]?.current?.setError(errorMsg);
         setNotification({
           type: 'error',
-          message: `Lỗi kết nối API: ${err.message}`
+          message: errorMsg
         });
       }
     } finally {
@@ -1548,6 +1551,7 @@ export default function TerminalPage() {
                   isDrawingsLocked={isDrawingsLocked}
                   onSyncDrawings={handleSyncDrawings}
                   onSyncCrosshair={handleSyncCrosshair}
+                  onRetryLoad={(sIdx, c) => fetchCandlesForSlot(sIdx, c, false, false)}
                 />
               </div>
             );

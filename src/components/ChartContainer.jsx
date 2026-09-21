@@ -369,6 +369,7 @@ const ChartContainer = forwardRef(function ChartContainer(
     onSyncDrawings,
     onSyncCrosshair,
     onSelectSlot,
+    onRetryLoad,
   },
   ref
 ) {
@@ -953,8 +954,9 @@ const ChartContainer = forwardRef(function ChartContainer(
   }, [activeTimezone]);
 
   const needsAutoFitRef = useRef(true);
-  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(Boolean(currentCode));
   const [loadingMessage, setLoadingMessage] = useState('Đang tải dữ liệu biểu đồ...');
+  const [errorMessage, setErrorMessage] = useState(null);
 
   // Reset forming candle and markers when symbol changes
   useEffect(() => {
@@ -1025,11 +1027,17 @@ const ChartContainer = forwardRef(function ChartContainer(
     setLoading(isLoading, message = 'Đang tải dữ liệu biểu đồ...') {
       setIsDataLoading(isLoading);
       if (message) setLoadingMessage(message);
-      if (isLoading && containerRef.current) {
-        containerRef.current.style.opacity = '0.15';
+      if (isLoading) {
+        setErrorMessage(null);
+        if (containerRef.current) containerRef.current.style.opacity = '0.15';
       } else if (!isLoading && containerRef.current) {
         containerRef.current.style.opacity = '1';
       }
+    },
+    setError(errMsg) {
+      setIsDataLoading(false);
+      setErrorMessage(errMsg);
+      if (containerRef.current) containerRef.current.style.opacity = '0.15';
     },
     fitContent() {
       if (chartRef.current) {
@@ -1116,6 +1124,7 @@ const ChartContainer = forwardRef(function ChartContainer(
     },
 
     renderDataset(dataArray, isInitial = false) {
+      setErrorMessage(null);
       if (!Array.isArray(dataArray) || dataArray.length === 0) {
         setIsDataLoading(false);
         if (containerRef.current) containerRef.current.style.opacity = '1';
@@ -2022,6 +2031,28 @@ const ChartContainer = forwardRef(function ChartContainer(
           <div className="chart-tf-loading-text">
             {loadingMessage || 'Đang tải dữ liệu biểu đồ...'}
           </div>
+        </div>
+      )}
+
+      {/* Error & Retry Card Overlay */}
+      {!isDataLoading && errorMessage && (
+        <div className="chart-tf-loading-overlay" style={{ background: 'rgba(11, 14, 20, 0.92)' }}>
+          <div style={{ fontSize: 36, marginBottom: 4 }}>⚠️</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#FF5252', textAlign: 'center', maxWidth: 360, lineHeight: 1.5 }}>
+            {errorMessage}
+          </div>
+          <button
+            className="btn btn-primary"
+            style={{ padding: '8px 20px', fontSize: 12.5, fontWeight: 700, borderRadius: 6, marginTop: 8 }}
+            onClick={() => {
+              setErrorMessage(null);
+              setIsDataLoading(true);
+              setLoadingMessage('Đang kết nối lại...');
+              if (onRetryLoad) onRetryLoad(slotIndex, currentCode);
+            }}
+          >
+            🔄 Thử kết nối lại
+          </button>
         </div>
       )}
 

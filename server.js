@@ -23,6 +23,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const { createClient: createSupabaseClient } = require('@supabase/supabase-js');
@@ -1039,6 +1040,70 @@ nextApp.prepare().then(async () => {
   let lastRefreshTimestamp = 0;
 
   /**
+   * Pure IPv4 HTTPS request helper to eliminate Undici IPv6 connect timeouts (UND_ERR_CONNECT_TIMEOUT) on VPS
+   */
+  function requestCraziiApi(urlStr, options = {}) {
+    return new Promise((resolve, reject) => {
+      try {
+        const u = new URL(urlStr);
+        const method = (options.method || 'GET').toUpperCase();
+        const headers = { ...(options.headers || {}) };
+        const body = options.body;
+        const timeoutMs = options.timeout || 10000;
+
+        const req = https.request({
+          protocol: u.protocol,
+          hostname: u.hostname,
+          port: u.port || 443,
+          path: u.pathname + u.search,
+          method: method,
+          headers: headers,
+          family: 4, // STRICTLY IPv4! Never hangs on IPv6 or causes UND_ERR_CONNECT_TIMEOUT
+          timeout: timeoutMs,
+        }, (res) => {
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const buffer = Buffer.concat(chunks);
+            const rawText = buffer.toString('utf8');
+            resolve({
+              status: res.statusCode,
+              statusText: res.statusMessage,
+              ok: res.statusCode >= 200 && res.statusCode < 300,
+              headers: {
+                get: (name) => res.headers[name.toLowerCase()] || ''
+              },
+              text: () => Promise.resolve(rawText),
+              json: () => {
+                try {
+                  return Promise.resolve(JSON.parse(rawText));
+                } catch (e) {
+                  return Promise.reject(e);
+                }
+              }
+            });
+          });
+        });
+
+        req.on('timeout', () => {
+          req.destroy(new Error(`Connect timeout after ${timeoutMs}ms (IPv4)`));
+        });
+
+        req.on('error', (err) => {
+          reject(err);
+        });
+
+        if (body) {
+          req.write(typeof body === 'string' ? body : JSON.stringify(body));
+        }
+        req.end();
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  /**
    * Core Function: Execute Refresh Token with Crazii API using the 3-day Refresh Token
    */
   async function executeRefreshToken(customRefreshToken = null, force = false) {
@@ -1106,11 +1171,11 @@ nextApp.prepare().then(async () => {
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          refreshResponse = await fetch(targetUrl, {
+          refreshResponse = await requestCraziiApi(targetUrl, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify({ token: refreshToken }),
-            signal: AbortSignal.timeout(10000)
+            timeout: 10000
           });
           refreshError = null;
           break;
@@ -1149,11 +1214,11 @@ nextApp.prepare().then(async () => {
                 console.log(`[Token Refresh] 🔄 Found newer valid Refresh Token in Database! Retrying refresh with DB token...`);
                 memoryRefreshToken = latestDbToken.trim();
                 process.env.CRAZII_REFRESH_TOKEN = latestDbToken.trim();
-                response = await fetch(targetUrl, {
+                response = await requestCraziiApi(targetUrl, {
                   method: 'POST',
                   headers: headers,
                   body: JSON.stringify({ token: latestDbToken.trim().replace(/^Bearer\s+/i, '') }),
-                  signal: AbortSignal.timeout(10000)
+                  timeout: 10000
                 });
               }
             }
@@ -3961,10 +4026,10 @@ nextApp.prepare().then(async () => {
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        response = await fetch(targetUrl, { 
+        response = await requestCraziiApi(targetUrl, { 
           method: 'GET', 
           headers: headers,
-          signal: AbortSignal.timeout(12000)
+          timeout: 10000
         });
 
         if (response.status === 401) {
@@ -3974,10 +4039,10 @@ nextApp.prepare().then(async () => {
             authToken = refreshResult.accessToken || refreshResult.token;
             headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
             console.log(`[REST] Retrying candle fetch with freshly refreshed token...`);
-            response = await fetch(targetUrl, { 
+            response = await requestCraziiApi(targetUrl, { 
               method: 'GET', 
               headers: headers,
-              signal: AbortSignal.timeout(12000)
+              timeout: 10000
             });
           }
         }
