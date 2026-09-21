@@ -1,8 +1,3 @@
-import dns from 'dns';
-if (dns && typeof dns.setDefaultResultOrder === 'function') {
-  dns.setDefaultResultOrder('ipv4first');
-}
-
 export function decodeJwt(token) {
   if (!token || typeof token !== 'string') return null;
   const clean = token.replace(/^Bearer\s+/i, '').trim();
@@ -112,38 +107,12 @@ export async function executeRefreshToken(force = false) {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0'
     };
 
-    let refreshResponse = null;
-    let refreshError = null;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        refreshResponse = await fetch(targetUrl, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ token: refreshToken }),
-          signal: AbortSignal.timeout(10000)
-        });
-        refreshError = null;
-        break;
-      } catch (netErr) {
-        refreshError = netErr;
-        console.warn(`[API Token Refresh Attempt ${attempt}/3 Failed]:`, netErr.message, netErr.cause ? `(Cause: ${netErr.cause.code || netErr.cause.message || netErr.cause})` : '');
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 600 * attempt));
-        }
-      }
-    }
-
-    if (!refreshResponse && refreshError) {
-      return { 
-        success: false, 
-        error: refreshError.message,
-        cause: refreshError.cause ? (refreshError.cause.code || refreshError.cause.message || String(refreshError.cause)) : undefined
-      };
-    }
-
     try {
-      const response = refreshResponse;
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ token: refreshToken })
+      });
 
       if (!response.ok) {
         const errText = await response.text();
@@ -208,11 +177,7 @@ export async function executeRefreshToken(force = false) {
         refreshPayload: decodedRefresh
       };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error.message,
-        cause: error.cause ? (error.cause.code || error.cause.message || String(error.cause)) : undefined
-      };
+      return { success: false, error: error.message };
     } finally {
       inFlightRefreshPromise = null;
     }
