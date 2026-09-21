@@ -953,6 +953,8 @@ const ChartContainer = forwardRef(function ChartContainer(
   }, [activeTimezone]);
 
   const needsAutoFitRef = useRef(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Đang tải dữ liệu biểu đồ...');
 
   // Reset forming candle and markers when symbol changes
   useEffect(() => {
@@ -1020,6 +1022,15 @@ const ChartContainer = forwardRef(function ChartContainer(
 
   // Expose API for real-time updates and dataset loading
   useImperativeHandle(ref, () => ({
+    setLoading(isLoading, message = 'Đang tải dữ liệu biểu đồ...') {
+      setIsDataLoading(isLoading);
+      if (message) setLoadingMessage(message);
+      if (isLoading && containerRef.current) {
+        containerRef.current.style.opacity = '0.15';
+      } else if (!isLoading && containerRef.current) {
+        containerRef.current.style.opacity = '1';
+      }
+    },
     fitContent() {
       if (chartRef.current) {
         try {
@@ -1105,8 +1116,17 @@ const ChartContainer = forwardRef(function ChartContainer(
     },
 
     renderDataset(dataArray, isInitial = false) {
-      if (!Array.isArray(dataArray) || dataArray.length === 0) return;
+      if (!Array.isArray(dataArray) || dataArray.length === 0) {
+        setIsDataLoading(false);
+        if (containerRef.current) containerRef.current.style.opacity = '1';
+        return;
+      }
       if (!candleSeriesRef.current) return;
+
+      // Keep chart canvas dimmed / low-opacity while injecting data & calculating scales
+      if (containerRef.current) {
+        containerRef.current.style.opacity = '0.05';
+      }
 
       // 1. Reset and clear previous asset price lines to avoid price scale distortion
       activePriceLinesMapRef.current.forEach((line) => {
@@ -1312,8 +1332,8 @@ const ChartContainer = forwardRef(function ChartContainer(
         }
       }
 
-      // AUTO-FIT ON INITIAL LOAD OR ASSET SWITCH
-      const shouldAutoFit = isInitial || needsAutoFitRef.current;
+      // AUTO-FIT ON DATASET LOAD (ALWAYS auto-fit on timeframe or asset switch to eliminate giant stretched single candles)
+      const shouldAutoFit = true;
       if (shouldAutoFit && chartRef.current) {
         needsAutoFitRef.current = false;
         try {
@@ -1371,7 +1391,7 @@ const ChartContainer = forwardRef(function ChartContainer(
         updatePaneHeaderPositions();
         applySolidPaneStyles(chartRef.current?.panes());
         redrawDrawings();
-        if (shouldAutoFit && chartRef.current) {
+        if (chartRef.current) {
           try {
             if (candleSeriesRef.current) {
               candleSeriesRef.current.priceScale().applyOptions({ autoScale: true });
@@ -1401,7 +1421,12 @@ const ChartContainer = forwardRef(function ChartContainer(
               chartRef.current.timeScale().scrollToRealtime();
             } catch (e) {}
           }
-        }, 50);
+          // Smooth progressive reveal once layout and fitContent are completely applied
+          setIsDataLoading(false);
+          if (containerRef.current) {
+            containerRef.current.style.opacity = '1';
+          }
+        }, 60);
       }
     },
 
@@ -1990,6 +2015,16 @@ const ChartContainer = forwardRef(function ChartContainer(
 
   return (
     <div id="chart-wrapper" onMouseMove={handleWrapperMouseMove} onMouseDown={onSelectSlot}>
+      {/* Timeframe & Asset Smooth Loading Transition Overlay */}
+      {isDataLoading && (
+        <div className="chart-tf-loading-overlay">
+          <div className="chart-tf-spinner" />
+          <div className="chart-tf-loading-text">
+            {loadingMessage || 'Đang tải dữ liệu biểu đồ...'}
+          </div>
+        </div>
+      )}
+
       {/* Watermarks */}
       <div className="watermark-top-right">TRADEWH<span>.COM</span></div>
       <div className="watermark-center">TRADEWH</div>

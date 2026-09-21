@@ -470,11 +470,20 @@ export default function TerminalPage() {
     if (!token) return;
 
     if (!isSilent) setIsRefreshing(true);
+    let loadedSuccessfully = false;
 
     try {
-      const res = await fetch(`/api/candles?code=${encodeURIComponent(codeToFetch)}`, {
+      let res = await fetch(`/api/candles?code=${encodeURIComponent(codeToFetch)}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      // Auto-retry once on 5xx proxy error
+      if (res.status >= 500) {
+        await new Promise(r => setTimeout(r, 1000));
+        res = await fetch(`/api/candles?code=${encodeURIComponent(codeToFetch)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      }
 
       if (res.status === 401) {
         const errorData = await res.json().catch(() => ({}));
@@ -539,9 +548,14 @@ export default function TerminalPage() {
 
       if (!res.ok) {
         if (!isSilent) {
+          const isProxyErr = result.message === 'Proxy fetch error';
+          const causeInfo = result.cause ? ` (${result.cause})` : (result.error ? ` (${result.error})` : '');
+          const errorMsg = isProxyErr
+            ? `Lỗi kết nối máy chủ Crazii (${codeToFetch})${causeInfo}. Vui lòng thử lại.`
+            : `API (${codeToFetch}): ${result.message || 'Lỗi tải dữ liệu nến'}`;
           setNotification({
             type: 'error',
-            message: `API (${codeToFetch}): ${result.message || 'Authentication required. Check CRAZII_REFRESH_TOKEN in Environment Variables.'}`
+            message: errorMsg
           });
         }
         return;
@@ -575,6 +589,7 @@ export default function TerminalPage() {
 
       if (targetChartRef && targetChartRef.current) {
         targetChartRef.current.renderDataset(list, isInitial);
+        loadedSuccessfully = true;
         if (isInitial && slotIndex === 0) {
           setTimeout(() => {
             setIsChartReady(true);
@@ -596,6 +611,9 @@ export default function TerminalPage() {
       }
     } finally {
       if (!isSilent) setIsRefreshing(false);
+      if (!loadedSuccessfully) {
+        chartRefs[slotIndex]?.current?.setLoading(false);
+      }
     }
   }, []);
 
@@ -807,6 +825,9 @@ export default function TerminalPage() {
     const symObj = getSymbolByCode(symbolCode);
     const targetSlotIndex = activeSlotIndex;
 
+    // Immediately trigger smooth loading overlay
+    chartRefs[targetSlotIndex]?.current?.setLoading(true, `Đang tải ${symObj?.symbol || symObj?.name || symbolCode}...`);
+
     setSlots((prev) => {
       const next = [...prev];
       const isFirstEverPick = prev.every((s) => !s.code);
@@ -853,6 +874,9 @@ export default function TerminalPage() {
     const targetSlotIndex = activeSlotIndex;
     const currentSlot = slotsRef.current[targetSlotIndex];
     const symObj = currentSlot?.symbolObj || activeSymbolObj;
+
+    // Immediately trigger smooth loading overlay
+    chartRefs[targetSlotIndex]?.current?.setLoading(true, `Đang tải khung ${label}...`);
 
     setCurrentCode(code);
     setTimeframeLabel(label);

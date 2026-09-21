@@ -1,5 +1,11 @@
 require('dotenv').config();
 
+// Fix IPv6 issue on Linux VPS: Force Node.js DNS resolver to prioritize IPv4
+const dns = require('dns');
+if (dns && typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
 // Ensure DATABASE_URL has ?pgbouncer=true before Prisma query engine starts
 if (process.env.DATABASE_URL) {
   let dbUrl = process.env.DATABASE_URL.trim();
@@ -1095,13 +1101,39 @@ nextApp.prepare().then(async () => {
       };
 
       console.log(`[Token Refresh] 🔄 Refreshing 15-minute Access Token using 3-day Refresh Token (Source: ${refreshToken === customRefreshToken ? 'Custom' : 'Database/Memory'})...`);
-      try {
-        let response = await fetch(targetUrl, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ token: refreshToken })
-        });
+      let refreshResponse = null;
+      let refreshError = null;
 
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          refreshResponse = await fetch(targetUrl, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ token: refreshToken }),
+            signal: AbortSignal.timeout(10000)
+          });
+          refreshError = null;
+          break;
+        } catch (netErr) {
+          refreshError = netErr;
+          console.warn(`[Token Refresh Attempt ${attempt}/3 Failed]:`, netErr.message, netErr.cause ? `(Cause: ${netErr.cause.code || netErr.cause.message || netErr.cause})` : '');
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 600 * attempt));
+          }
+        }
+      }
+
+      if (!refreshResponse && refreshError) {
+        console.error(`[Token Refresh Final Error]:`, refreshError.message, refreshError.cause ? `(Cause: ${refreshError.cause.code || refreshError.cause.message || refreshError.cause})` : '');
+        return { 
+          success: false, 
+          error: refreshError.message,
+          cause: refreshError.cause ? (refreshError.cause.code || refreshError.cause.message || String(refreshError.cause)) : undefined
+        };
+      }
+
+      let response = refreshResponse;
+      try {
         if (!response.ok) {
           const errText = await response.text();
           console.warn(`[Token Refresh] ❌ Crazii API rejected refresh request (${response.status}): ${errText}`);
@@ -1120,7 +1152,8 @@ nextApp.prepare().then(async () => {
                 response = await fetch(targetUrl, {
                   method: 'POST',
                   headers: headers,
-                  body: JSON.stringify({ token: latestDbToken.trim().replace(/^Bearer\s+/i, '') })
+                  body: JSON.stringify({ token: latestDbToken.trim().replace(/^Bearer\s+/i, '') }),
+                  signal: AbortSignal.timeout(10000)
                 });
               }
             }
@@ -1179,8 +1212,12 @@ nextApp.prepare().then(async () => {
           refreshPayload: decodedRefresh
         };
       } catch (error) {
-        console.error(`[Token Refresh Error]`, error.message);
-        return { success: false, error: error.message };
+        console.error(`[Token Refresh Error]`, error.message, error.cause ? `(Cause: ${error.cause.code || error.cause.message || error.cause})` : '');
+        return { 
+          success: false, 
+          error: error.message,
+          cause: error.cause ? (error.cause.code || error.cause.message || String(error.cause)) : undefined
+        };
       } finally {
         inFlightRefreshPromise = null;
       }
@@ -3919,20 +3956,53 @@ nextApp.prepare().then(async () => {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    try {
-      let response = await fetch(targetUrl, { method: 'GET', headers: headers });
+    let response = null;
+    let lastError = null;
 
-      if (response.status === 401) {
-        console.warn(`[REST 401] Token rejected. Attempting auto refresh-token...`);
-        const refreshResult = await executeRefreshToken(null, true);
-        if (refreshResult.success) {
-          authToken = refreshResult.accessToken || refreshResult.token;
-          headers['Authorization'] = `Bearer ${authToken}`;
-          console.log(`[REST] Retrying candle fetch with freshly refreshed token...`);
-          response = await fetch(targetUrl, { method: 'GET', headers: headers });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        response = await fetch(targetUrl, { 
+          method: 'GET', 
+          headers: headers,
+          signal: AbortSignal.timeout(12000)
+        });
+
+        if (response.status === 401) {
+          console.warn(`[REST 401] Token rejected. Attempting auto refresh-token...`);
+          const refreshResult = await executeRefreshToken(null, true);
+          if (refreshResult.success) {
+            authToken = refreshResult.accessToken || refreshResult.token;
+            headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
+            console.log(`[REST] Retrying candle fetch with freshly refreshed token...`);
+            response = await fetch(targetUrl, { 
+              method: 'GET', 
+              headers: headers,
+              signal: AbortSignal.timeout(12000)
+            });
+          }
+        }
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`[REST Attempt ${attempt}/3 Failed for ${code}]:`, err.message, err.cause ? `(Cause: ${err.cause.code || err.cause.message || err.cause})` : '');
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 600 * attempt));
         }
       }
+    }
 
+    if (!response && lastError) {
+      console.error(`[REST Error Final for ${code}]:`, lastError.message, lastError.cause ? `(Cause: ${lastError.cause.code || lastError.cause.message || lastError.cause})` : '');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Proxy fetch error', 
+        error: lastError.message,
+        cause: lastError.cause ? (lastError.cause.code || lastError.cause.message || String(lastError.cause)) : undefined
+      });
+    }
+
+    try {
       const contentType = response.headers.get('content-type') || '';
       const isJson = contentType.includes('application/json');
 
@@ -3959,8 +4029,8 @@ nextApp.prepare().then(async () => {
         return res.send(rawText);
       }
     } catch (error) {
-      console.error(`[REST Error]`, error.message);
-      return res.status(500).json({ success: false, message: 'Proxy fetch error', error: error.message });
+      console.error(`[REST Parse Error for ${code}]`, error.message);
+      return res.status(500).json({ success: false, message: 'Proxy parse error', error: error.message });
     }
   });
 
@@ -3991,7 +4061,7 @@ nextApp.prepare().then(async () => {
     }
 
     targetSocket = ioClient(wsHost, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       query: {
         role: 'downstream',
         token: cleanToken,
@@ -4002,7 +4072,7 @@ nextApp.prepare().then(async () => {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       randomizationFactor: 0.5,
-      timeout: 10000,
+      timeout: 15000,
       extraHeaders: {
         'Origin': 'https://crazii.com',
         'Referer': 'https://crazii.com/',

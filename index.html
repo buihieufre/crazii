@@ -1745,11 +1745,22 @@
       let url = `/api/candles?code=${encodeURIComponent(currentCode)}`;
 
       try {
-        const response = await fetch(url, {
+        let response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         });
+
+        // Auto-retry once on 5xx proxy error
+        if (response.status >= 500) {
+          await new Promise(r => setTimeout(r, 1000));
+          response = await fetch(url, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+        }
+
         const result = await response.json();
 
         if (response.status === 401) {
@@ -1760,8 +1771,12 @@
         if (!response.ok) {
           banner.className = 'error';
           banner.style.display = 'flex';
+          const causeInfo = result.cause ? ` (${result.cause})` : '';
+          const errMsg = result.message === 'Proxy fetch error'
+            ? `Lỗi kết nối máy chủ Crazii${causeInfo}. Vui lòng thử lại.`
+            : (result.message || 'Authentication required.');
           document.getElementById('notification-msg').innerHTML = `
-            <strong>API (${currentCode}):</strong> ${result.message || 'Authentication required.'}
+            <strong>API (${currentCode}):</strong> ${errMsg}
           `;
           demoBtn.style.display = 'inline-flex';
           return;
