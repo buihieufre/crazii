@@ -1161,10 +1161,9 @@ nextApp.prepare().then(async () => {
           refreshToken: newRefreshToken || (customRefreshToken ? refreshToken : null)
         });
 
-        // Reconnect upstream WebSocket if active channels are registered
-        if (activeChannels.size > 0) {
-          connectUpstreamWebSocket();
-        }
+        // NOTE: Do NOT call connectUpstreamWebSocket() here.
+        // The disconnect handler that called executeRefreshToken() will call connectUpstreamWebSocket() itself
+        // after this function returns. Calling it here causes a double-connect race condition.
 
         io.emit('token_refreshed', {
           success: true,
@@ -3971,12 +3970,18 @@ nextApp.prepare().then(async () => {
   let upstreamReconnectTimer = null;
   let upstreamReconnectDelay = 1000; // ms, grows with backoff
   const UPSTREAM_RECONNECT_DELAY_MAX = 30000;
+  let isUpstreamConnecting = false; // guard against double-connect
 
   function connectUpstreamWebSocket() {
     if (activeChannels.size === 0) {
       console.log(`[WS Relay] ⏸️ No active channels subscribed. Upstream WebSocket remains IDLE.`);
       return;
     }
+    if (isUpstreamConnecting) {
+      console.log(`[WS Relay] ⏳ Already connecting, skipping duplicate call.`);
+      return;
+    }
+    isUpstreamConnecting = true;
 
     const wsToken = getActiveAuthToken(null);
     const cleanToken = wsToken.startsWith('Bearer ') ? wsToken.replace('Bearer ', '') : wsToken;
@@ -3996,6 +4001,12 @@ nextApp.prepare().then(async () => {
       transports: ['websocket'],
       query: {
         role: 'downstream',
+        token: cleanToken,   // some socket.io servers read token from query
+        deviceId: deviceId
+      },
+      // Send token via socket.io auth handshake (most common socket.io v4 pattern)
+      auth: {
+        token: cleanToken,
         deviceId: deviceId
       },
       // Disable built-in auto-reconnect — we handle reconnect manually with backoff
@@ -4012,6 +4023,7 @@ nextApp.prepare().then(async () => {
 
     targetSocket.on('connect', () => {
       isUpstreamConnected = true;
+      isUpstreamConnecting = false;
       upstreamReconnectDelay = 1000; // reset backoff on successful connect
       console.log(`[WS Relay] ✅ Connected to upstream Crazii WebSocket! Subscribing to: [${Array.from(activeChannels).join(', ')}]`);
       activeChannels.forEach(channel => {
@@ -4045,6 +4057,13 @@ nextApp.prepare().then(async () => {
 
     let lastKickedReason = null;
 
+    // DEBUG: Log all events from upstream to diagnose why server disconnects us
+    targetSocket.onAny((eventName, ...args) => {
+      if (!['price', 'data'].includes(eventName)) {
+        console.log(`[WS Relay] 📨 Upstream event: "${eventName}"`, JSON.stringify(args).slice(0, 300));
+      }
+    });
+
     targetSocket.on('kicked', (msg) => {
       lastKickedReason = msg || 'Another login detected';
       console.warn(`[WS Relay] ⚠️ Bị máy chủ Crazii ngắt kết nối (Kicked): "${lastKickedReason}". Sẽ refresh token trước khi reconnect.`);
@@ -4054,6 +4073,7 @@ nextApp.prepare().then(async () => {
 
     targetSocket.on('connect_error', (err) => {
       isUpstreamConnected = false;
+      isUpstreamConnecting = false;
       console.error(`[WS Relay] Connection error:`, err.message);
       io.emit('upstream_status', { connected: false, error: err.message });
 
@@ -4078,6 +4098,7 @@ nextApp.prepare().then(async () => {
 
     targetSocket.on('disconnect', (reason) => {
       isUpstreamConnected = false;
+      isUpstreamConnecting = false;
       console.warn(`[WS Relay] Disconnected from upstream:`, reason);
       io.emit('upstream_status', { connected: false, reason: reason, kicked: lastKickedReason });
 
@@ -4102,8 +4123,9 @@ nextApp.prepare().then(async () => {
           const nowSec = Math.floor(Date.now() / 1000);
           const isExpiring = !jwt || !jwt.exp || (jwt.exp - nowSec <= 60);
 
-          if (isExpiring || isServerKick || kickedBy) {
-            console.log(`[WS Relay] ⏳ ${kickedBy ? 'Kicked – ' : isServerKick ? 'Server disconnect – ' : ''}Token expiring (${jwt?.exp ? jwt.exp - nowSec : 0}s left). Refreshing before reconnect...`);
+          if (isExpiring || kickedBy) {
+            // Only refresh when token is truly expiring or account was explicitly kicked
+            console.log(`[WS Relay] ⏳ ${kickedBy ? 'Kicked – ' : ''}Token expiring (${jwt?.exp ? jwt.exp - nowSec : 0}s left). Refreshing before reconnect...`);
             await executeRefreshToken(null, true);
           } else {
             console.log(`[WS Relay] 🔄 Reconnecting upstream WebSocket (Token valid for ${jwt.exp - nowSec}s, Reason: ${reason})...`);
