@@ -3720,7 +3720,7 @@ nextApp.prepare().then(async () => {
           autoRefreshIntervalHours: 12
         },
         upstreamWebSocket: {
-          host: 'https://tick-ws.crazii.com',
+          host: 'https://ws.crazii.com',
           connected: isUpstreamConnected,
           activeChannels: Array.from(activeChannels)
         }
@@ -3982,7 +3982,7 @@ nextApp.prepare().then(async () => {
     const cleanToken = wsToken.startsWith('Bearer ') ? wsToken.replace('Bearer ', '') : wsToken;
     const deviceId = getActiveDeviceId();
 
-    const wsHost = 'https://tick-ws.crazii.com';
+    const wsHost = 'https://ws.crazii.com';
     console.log(`[WS Relay] ⚡ Connecting on-demand to upstream WebSocket: ${wsHost}... (Channels: [${Array.from(activeChannels).join(', ')}])`);
 
     if (targetSocket) {
@@ -3996,7 +3996,6 @@ nextApp.prepare().then(async () => {
       transports: ['websocket'],
       query: {
         role: 'downstream',
-        token: cleanToken,
         deviceId: deviceId
       },
       // Disable built-in auto-reconnect — we handle reconnect manually with backoff
@@ -4006,6 +4005,7 @@ nextApp.prepare().then(async () => {
         'Origin': 'https://crazii.com',
         'Referer': 'https://crazii.com/',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0',
+        'Authorization': `Bearer ${cleanToken}`,
         'Device-Id': deviceId
       }
     });
