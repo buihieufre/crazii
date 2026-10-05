@@ -3969,6 +3969,8 @@ nextApp.prepare().then(async () => {
   let activeChannels = new Set();
   let isUpstreamConnected = false;
   let upstreamReconnectTimer = null;
+  let upstreamReconnectDelay = 1000; // ms, grows with backoff
+  const UPSTREAM_RECONNECT_DELAY_MAX = 30000;
 
   function connectUpstreamWebSocket() {
     if (activeChannels.size === 0) {
@@ -3997,11 +3999,8 @@ nextApp.prepare().then(async () => {
         token: cleanToken,
         deviceId: deviceId
       },
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      randomizationFactor: 0.5,
+      // Disable built-in auto-reconnect — we handle reconnect manually with backoff
+      reconnection: false,
       timeout: 10000,
       extraHeaders: {
         'Origin': 'https://crazii.com',
@@ -4013,6 +4012,7 @@ nextApp.prepare().then(async () => {
 
     targetSocket.on('connect', () => {
       isUpstreamConnected = true;
+      upstreamReconnectDelay = 1000; // reset backoff on successful connect
       console.log(`[WS Relay] ✅ Connected to upstream Crazii WebSocket! Subscribing to: [${Array.from(activeChannels).join(', ')}]`);
       activeChannels.forEach(channel => {
         targetSocket.emit('subscribe', channel);
@@ -4023,41 +4023,7 @@ nextApp.prepare().then(async () => {
       io.emit('upstream_status', { connected: true, timestamp: Date.now() });
     });
 
-    if (targetSocket.io) {
-      targetSocket.io.on('reconnect_attempt', (attempt) => {
-        console.log(`[WS Relay] 🔄 Reconnection attempt #${attempt} to upstream WebSocket...`);
-        io.emit('upstream_status', { connected: false, reconnecting: true, attempt: attempt });
-      });
-
-      targetSocket.io.on('reconnect', (attempt) => {
-        isUpstreamConnected = true;
-        console.log(`[WS Relay] ✅ Successfully reconnected to upstream on attempt #${attempt}!`);
-        activeChannels.forEach(channel => {
-          targetSocket.emit('subscribe', channel);
-        });
-        if (!activeChannels.has('price')) {
-          targetSocket.emit('subscribe', 'price');
-        }
-        io.emit('upstream_status', { connected: true, timestamp: Date.now() });
-      });
-
-      targetSocket.io.on('reconnect_error', (err) => {
-        console.warn(`[WS Relay] ⚠️ Reconnection error:`, err.message);
-      });
-
-      targetSocket.io.on('reconnect_failed', async () => {
-        console.error(`[WS Relay] ❌ Reconnection failed completely. Forcing token refresh & retrying in 3s...`);
-        clearTimeout(upstreamReconnectTimer);
-        if (activeChannels.size > 0) {
-          upstreamReconnectTimer = setTimeout(async () => {
-            if (activeChannels.size > 0) {
-              await executeRefreshToken(null, true);
-              connectUpstreamWebSocket();
-            }
-          }, 3000);
-        }
-      });
-    }
+    // Note: built-in reconnect events removed since reconnection: false
 
     targetSocket.on('data', (...args) => {
       io.emit('data', ...args);
@@ -4081,7 +4047,9 @@ nextApp.prepare().then(async () => {
 
     targetSocket.on('kicked', (msg) => {
       lastKickedReason = msg || 'Another login detected';
-      console.warn(`[WS Relay] ⚠️ Bị máy chủ Crazii ngắt kết nối (Kicked): "${lastKickedReason}". (Tài khoản đang mở đồng thời trên crazii.com hoặc trên Render)`);
+      console.warn(`[WS Relay] ⚠️ Bị máy chủ Crazii ngắt kết nối (Kicked): "${lastKickedReason}". Sẽ refresh token trước khi reconnect.`);
+      // Force token refresh now so when disconnect fires, we reconnect with a fresh token
+      executeRefreshToken(null, true).catch(() => {});
     });
 
     targetSocket.on('connect_error', (err) => {
@@ -4113,27 +4081,35 @@ nextApp.prepare().then(async () => {
       console.warn(`[WS Relay] Disconnected from upstream:`, reason);
       io.emit('upstream_status', { connected: false, reason: reason, kicked: lastKickedReason });
 
-      // Reconnect upstream quickly
       if (activeChannels.size > 0) {
         clearTimeout(upstreamReconnectTimer);
+
+        // 'io server disconnect' = server chủ động kick → không reconnect ngay mà backoff
+        const isServerKick = reason === 'io server disconnect';
+        const delay = isServerKick
+          ? Math.min(upstreamReconnectDelay * 2, UPSTREAM_RECONNECT_DELAY_MAX)
+          : 1000;
+        if (isServerKick) upstreamReconnectDelay = delay;
+
+        const kickedBy = lastKickedReason;
         lastKickedReason = null;
 
         upstreamReconnectTimer = setTimeout(async () => {
-          if (activeChannels.size > 0) {
-            const auth = getActiveAuthToken();
-            const jwt = decodeJwt(auth);
-            const nowSec = Math.floor(Date.now() / 1000);
-            const isExpiring = !jwt || !jwt.exp || (jwt.exp - nowSec <= 60);
+          if (activeChannels.size === 0) return;
 
-            if (isExpiring) {
-              console.log(`[WS Relay] ⏳ Token expiring (${jwt?.exp ? jwt.exp - nowSec : 0}s left). Refreshing before reconnect...`);
-              await executeRefreshToken(null, true);
-            } else {
-              console.log(`[WS Relay] 🔄 Reconnecting upstream WebSocket (Token valid for ${jwt.exp - nowSec}s, Reason: ${reason})...`);
-            }
-            connectUpstreamWebSocket();
+          const auth = getActiveAuthToken();
+          const jwt = decodeJwt(auth);
+          const nowSec = Math.floor(Date.now() / 1000);
+          const isExpiring = !jwt || !jwt.exp || (jwt.exp - nowSec <= 60);
+
+          if (isExpiring || isServerKick || kickedBy) {
+            console.log(`[WS Relay] ⏳ ${kickedBy ? 'Kicked – ' : isServerKick ? 'Server disconnect – ' : ''}Token expiring (${jwt?.exp ? jwt.exp - nowSec : 0}s left). Refreshing before reconnect...`);
+            await executeRefreshToken(null, true);
+          } else {
+            console.log(`[WS Relay] 🔄 Reconnecting upstream WebSocket (Token valid for ${jwt.exp - nowSec}s, Reason: ${reason})...`);
           }
-        }, 1000);
+          connectUpstreamWebSocket();
+        }, delay);
       }
     });
   }
